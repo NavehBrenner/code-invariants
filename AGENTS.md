@@ -1,39 +1,50 @@
-# Guidance for Coding Agents
+# AGENTS.md
 
-This repository is intentionally set up so that an AI coding agent can take over implementation.
+> **Status: draft — pending review.**  
+> Nothing in this file is closed. Content may change as the project evolves. Prefer `docs/SPECS.md` Locked decisions when this file and SPECS disagree, until review reconciles them.
 
-## Before you write any code
+## What this project is
 
-1. Read these three documents completely:
-   - [docs/VISION.md](docs/VISION.md)
-   - [docs/SPECS.md](docs/SPECS.md)
-   - [docs/RESEARCH.md](docs/RESEARCH.md)
-2. Understand that the current state is **documentation only**. There is no implementation yet.
-3. The original author already has a private TypeScript/TSX prototype for several compositional rules. The public goal is to generalise it.
+`code-invariants` turns high-level engineering standards into **executable CI checks** so AI coding agents (and humans) get structural quality without relying on prose instructions or manual review of large diffs.
 
-## Recommended first implementation tasks
+It sits **above** formatters and classic linters: compositional AST rules, module/layer boundaries, structural DRY, test-presence gates. Not a SAST product; not a reimplementation of Biome/ESLint.
 
-1. Scaffold a TypeScript package (or small monorepo) with:
-   - `ts-morph` as the primary AST library
-   - A simple plugin-based rule engine
-   - Vitest for testing the rules themselves
-2. Implement rule R2 (DataRegion-style exhaustive states) first — it is the most distinctive and highest-value compositional rule.
-3. Then R1 (query error handling) and R3 (semantic style tokens).
-4. Add a minimal CLI: `code-invariants check` that exits non-zero on violations.
-5. Add a GitHub Action example.
-6. Write tests that feed both valid and invalid example code and assert on the exact violations produced.
+## What to read before coding
 
-## Design constraints (do not violate)
+1. [docs/SPECS.md](docs/SPECS.md) — **Locked decisions** are binding until changed by review.
+2. [docs/VISION.md](docs/VISION.md) — why and success criteria.
+3. [docs/RESEARCH.md](docs/RESEARCH.md) — competitive context (Semgrep, dupehound, etc.).
+4. [docs/rulesets/](docs/rulesets/) — TypeScript must-have vs nice-to-have rules (product content, not agent style guides).
 
-- Core engine must remain free of generative LLM API dependencies.
-- Rules must be independently enableable/disableable.
-- Error messages must be clear enough for another agent to fix the violation autonomously.
-- Prefer pure static analysis. Use embeddings only for the semantic-DRY feature.
+Do **not** treat this repo’s future self-checks as a substitute for reading SPECS while the engine is still incomplete.
 
-## How to communicate progress
+## How to build (process, not style)
 
-- Open small, focused PRs.
-- Keep the documentation in `docs/` in sync with reality.
-- When you add a new rule, document it in `docs/SPECS.md` and add example good/bad snippets.
+- Implement against the **plugin contract** and CLI surface in SPECS — do not invent parallel APIs.
+- Prefer **extending plugins** over growing core, unless the change is shared infrastructure (frontend protocol, config, reporting).
+- **One coherent change per PR** (one rule, one engine slice, or one docs theme).
+- Add **fixtures** (valid + invalid) for every rule; messages must be actionable by another agent.
+- Dogfood: once `code-invariants check` exists, run it on this repo.
+- Core remains **free of generative LLM API keys**; embeddings only for optional semantic DRY.
 
-Thank you for helping turn high-level engineering standards into executable invariants.
+Code style and TypeScript hygiene will be enforced by the tool itself as it matures. Do not expand agent docs with lint rule lists.
+
+## Workflow skills
+
+| Skill | Use when |
+|-------|----------|
+| [create-plugin](skills/create-plugin/SKILL.md) | Scaffolding a new plugin package |
+| [add-rule](skills/add-rule/SKILL.md) | Adding one rule + fixtures to an existing plugin |
+
+Process skills (issues/PRs) live under [docs/CONTRIBUTING-AGENTS.md](docs/CONTRIBUTING-AGENTS.md) until dedicated skill folders exist.
+
+## MCP (planned)
+
+Product MCP surface (draft): `check`, `check_diff`, `list_rules`, `get_rule_docs`. See [docs/mcp.md](docs/mcp.md).
+
+## Non-goals for agents
+
+- Rewriting the core in Rust in v1
+- Wrapping or owning Biome/ESLint configuration
+- Building a security SAST competitor
+- Large “fix everything” PRs without fixtures or SPECS alignment
