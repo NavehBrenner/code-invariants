@@ -24,13 +24,29 @@ These decisions are considered stable unless a major new constraint appears:
    Core engine, CLI, MCP, and config system are written in **TypeScript**. Language frontends are separate packages that speak a stable, narrow protocol. Rules for a given language are written against that language’s native AST library (ts-morph for TypeScript, libCST/tree-sitter for Python, etc.). The core never imports language-specific AST types directly.
 
 4. **Plugins**  
-   First-class and user-writable. There is one explicit contract (see § Plugin contract). Plugins can be published as npm packages or loaded from local paths. Agent skills for creating and maintaining plugins are part of the deliverable.
+   First-class and user-writable. There is one explicit contract (see § Plugin contract). Plugins can be published as npm packages or loaded from local paths. Agent skills for creating and maintaining plugins are part of the deliverable.  
+   **v1 plugin language is TypeScript only.** Plugins are TypeScript/JavaScript packages that export the `Plugin` interface. Python-written plugins may be supported later via the same protocol once a Python frontend exists.
 
 5. **Runtime helpers**  
    Optional companion packages (e.g. `@code-invariants/react` shipping a reference `DataRegion`). Static rules work both with the official helpers and with equivalent structural patterns the user already has.
 
 6. **Scope of v1**  
    High-quality TypeScript/React engine first. Python (and other languages) later, reusing the same core protocol.
+
+7. **Relationship to classic linters/formatters**  
+   `code-invariants` is the *higher-order* layer. It does **not** wrap, re-implement, or own configuration for Biome, ESLint, Prettier, Oxlint, or Ruff. Users are expected to run a fast linter/formatter of their choice. We may later offer a thin convenience flag that invokes the user’s existing Biome/ESLint config and then runs our rules, but we never own those tools’ configuration or rule sets. Custom plugins that need classic lint/format results should call those tools themselves.
+
+8. **AST strategy**  
+   No unified cross-language AST. Each frontend parses with its native tool **once per file**. The resulting native source unit is reused by every rule for that language. The plugin contract stays language-agnostic at the boundary (`RuleContext` + `report`) while giving rules full native AST power inside `create`. This avoids both the precision loss of a lowest-common-denominator IR and the cost of re-parsing for every rule.
+
+9. **Performance approach**  
+   TypeScript core is the deliberate starting point for velocity and for a TypeScript-native plugin ecosystem. Performance is treated as a hard constraint:
+   - Default CI mode should be incremental (`--diff` / changed files only).
+   - Cache the language frontend’s project/AST state across runs where possible.
+   - Avoid naïve full-project type-aware analysis on every invocation.
+   - Measure real wall-clock time on representative monorepos early.
+   - Only if measured numbers are unacceptable: extract hot paths (parsing, simple structural walks) into a native (Rust/oxc) addon while keeping the rule-authoring surface in TypeScript.  
+   A full rewrite of the core in Rust (or making Rust the first supported language for self-hosting) is explicitly **out of scope** for v1.
 
 ---
 
@@ -104,6 +120,8 @@ Rules never touch the filesystem or the CLI. They only receive a `RuleContext` a
 
 A custom plugin is simply an npm package (or local folder) that exports a `Plugin`. The core discovers it from the `plugins` array in the user’s config.
 
+**v1 constraint**: plugins are authored in TypeScript/JavaScript only.
+
 ## 3. First-class rules (v1 targets)
 
 ### R1 — Query error handling (TypeScript / React)
@@ -176,7 +194,8 @@ Thin wrapper exposing at least: `check_file`, `check_diff`, `query_similar`, `li
 ## 9. Success metrics for v0.1
 
 - Three compositional rules (R1–R3) working on a real React + TanStack Query codebase
-- CLI `check` usable in GitHub Actions
+- CLI `check` usable in GitHub Actions (with `--diff` as the recommended CI mode)
 - Clear, actionable violation messages
 - Published plugin contract + at least one example custom plugin
 - Agent skills that allow another model to create a working plugin
+- Measured performance on at least one non-trivial monorepo; no naïve full-project re-parse on every run
