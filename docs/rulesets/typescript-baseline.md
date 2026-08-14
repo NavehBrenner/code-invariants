@@ -1,9 +1,11 @@
-# TypeScript baseline ruleset
+# TypeScript baseline ruleset (must-have)
 
 Language-level invariants for TypeScript (no framework-specific rules).  
 This is the foundation every TypeScript project should get from `code-invariants` before React, Node, or other plugins are layered on.
 
-**Sources researched (2026):** typescript-eslint (`recommended` / `strict` / `strict-type-checked` / `stylistic`), Biome recommended + TypeScript rules, TypeScript handbook & `strict` family, `@tsconfig/strictest`, Google TypeScript Style Guide, common production practices.
+**Sources researched (2026):** typescript-eslint (`recommended` / `strict` / `strict-type-checked` / `stylistic`), Biome recommended + TypeScript rules, TypeScript handbook & `strict` family, `@tsconfig/strictest`, Google TypeScript Style Guide, dependency-cruiser / eslint-plugin-boundaries / Feature-Sliced Design patterns, common production practices.
+
+**Companion doc:** [typescript-nice-to-have.md](./typescript-nice-to-have.md) — optional / advanced rules not required for the baseline.
 
 **How to read this document**
 
@@ -139,27 +141,80 @@ Align with Google TS style + common ecosystem practice. Enforce via lint where p
 | `ts/complexity` / cognitive complexity | Cap cyclomatic/cognitive complexity per function | biome / eslint | warn |
 | `ts/no-nested-ternary` | Avoid nested ternaries | biome / eslint | warn |
 | `ts/max-depth` | Limit block nesting depth | biome / eslint | warn |
-| `ts/no-export-all` / barrel discipline | Discourage `export *` from large barrels (tree-shaking & cycles) | lint / architecture | warn |
+| `ts/no-export-star` | Prefer explicit named re-exports over `export *` (clear public API, better tree-shaking) | lint / `code-invariants` | warn |
 | `ts/explicit-module-boundary-types` | Explicit return/param types on **exported** functions (not every local) | eslint | warn |
 
 ---
 
-## 8. Higher-order / structural rules (`code-invariants` engine)
+## 8. Module separation, public API, and layer hierarchy
 
-These are the rules classic linters handle poorly or not at all. They belong in our TypeScript baseline plugin.
+Good codebases are split by **concern** (feature / domain / layer). Each piece exposes a **public API** (typically a barrel `index.ts` or package entrypoint). Cross-boundary imports go **only** through that public API. Dependencies form a **strict stack hierarchy**: higher layers may import lower ones; the reverse is forbidden.
+
+This is a first-class responsibility of `code-invariants` (same family as dependency-cruiser, eslint-plugin-boundaries, ArchUnit, Sheriff, Feature-Sliced Design public-API rules).
+
+| ID | Intent | Enforcement | Default |
+|----|--------|-------------|--------|
+| `ts/module-public-api` | Every configured module/feature folder must declare a public entry (`index.ts` or explicit `exports` map). Internals are not part of the API. | `code-invariants` | error |
+| `ts/no-deep-import` | Imports from *outside* a module must target the module’s public entry only — never `feature/internal/...` or `feature/components/Foo`. Same-module relative imports remain allowed. | `code-invariants` | error |
+| `ts/layer-hierarchy` | Imports must respect a declared directed acyclic layer graph (e.g. `ui → application → domain → infra`). Upward or peer-forbidden edges fail the check. | `code-invariants` | error |
+| `ts/no-cross-feature-internals` | Feature A must not import Feature B’s non-public files; only B’s public API. | `code-invariants` | error |
+| `ts/no-circular-imports` | No import cycles in the project graph (modules or files). | `code-invariants` (or dependency-cruiser integration) | error |
+| `ts/explicit-barrel-exports` | Public barrels use explicit `export { X } from './x'` (not `export *`), so the API surface is auditable. | `code-invariants` / lint | warn |
+| `ts/no-barrel-of-barrels` | Limit barrel depth: a public entry may re-export from implementation files, not from nested barrels that re-export everything again (avoids mega-graphs and hidden cycles). | `code-invariants` | warn |
+| `ts/no-cross-package-deep-imports` | In monorepos, packages import other packages only via their package entry / `exports` field — not deep paths into `src/`. | `code-invariants` | error |
+
+### Configuration sketch
+
+```ts
+export default defineConfig({
+  languages: ["typescript"],
+  plugins: ["@code-invariants/typescript"],
+  architecture: {
+    // Modules = units with a public API
+    modules: [
+      { name: "auth", path: "src/features/auth", entry: "index.ts" },
+      { name: "billing", path: "src/features/billing", entry: "index.ts" },
+      { name: "shared", path: "src/shared", entry: "index.ts" },
+    ],
+    // Layers = ordered stack (index 0 is lowest / most foundational)
+    layers: [
+      { name: "domain", pattern: "src/domain/**" },
+      { name: "application", pattern: "src/application/**" },
+      { name: "infrastructure", pattern: "src/infrastructure/**" },
+      { name: "ui", pattern: "src/ui/**" },
+    ],
+    // Allowed edges: from → to[] (omit = only lower layers allowed)
+    allow: [
+      { from: "ui", to: ["application", "domain", "shared"] },
+      { from: "application", to: ["domain", "shared"] },
+      { from: "infrastructure", to: ["domain", "shared"] },
+      // domain imports nothing internal above itself
+    ],
+  },
+  rules: {
+    "ts/no-deep-import": "error",
+    "ts/layer-hierarchy": "error",
+    "ts/module-public-api": "error",
+  },
+});
+```
+
+Projects that do not configure `architecture` skip layer/module rules (or get a soft warning once). When configured, violations are hard errors in the `strict` preset.
+
+---
+
+## 9. Other higher-order / structural rules
 
 | ID | Intent | Enforcement | Default |
 |----|--------|-------------|--------|
 | `ts/no-default-export` (optional) | Prefer named exports for better refactors & tree-shaking (project choice) | `code-invariants` or lint | off (opt-in) |
 | `ts/explicit-return-type-public-api` | Public/exported API must have explicit return types | `code-invariants` / eslint | warn |
-| `ts/no-cross-package-deep-imports` | Ban deep imports into other packages’ internals (enforce public entrypoints) | `code-invariants` | error |
-| `ts/no-circular-imports` | Detect import cycles within the project graph | `code-invariants` (or dependency-cruiser integration) | error |
 | `ts/max-file-lines` | Soft/hard cap on file length (e.g. warn 400, error 800) | `code-invariants` | warn |
 | `ts/no-orphan-files` | Source files under `src` must be reachable from entrypoints or tests | `code-invariants` | warn |
 
 ---
 
-## 9. DRY / duplication
+## 10. DRY / duplication
 
 | ID | Intent | Enforcement | Default |
 |----|--------|-------------|--------|
@@ -169,7 +224,7 @@ These are the rules classic linters handle poorly or not at all. They belong in 
 
 ---
 
-## 10. Test presence (language-level)
+## 11. Test presence (language-level)
 
 | ID | Intent | Enforcement | Default |
 |----|--------|-------------|--------|
@@ -180,7 +235,7 @@ Note: coverage is necessary but not sufficient; the static reference check catch
 
 ---
 
-## 11. Suggested preset layers
+## 12. Suggested preset layers
 
 ```text
 typescript/recommended
@@ -188,15 +243,16 @@ typescript/recommended
   ├─ §2 Type safety (error)
   ├─ §3 Correctness (error on promises / exhaustiveness)
   ├─ §4 Modules/imports (error)
-  └─ §9 Structural DRY (error on clones)
+  ├─ §8 Module separation (error when architecture is configured)
+  └─ §10 Structural DRY (error on clones)
 
 typescript/strict
   ├─ everything in recommended
   ├─ §5 Style consistency (error)
   ├─ §6 Naming (error)
   ├─ §7 Complexity (warn)
-  ├─ §8 Structural (cycles, deep imports = error)
-  └─ §10 Test presence (warn)
+  ├─ §9 Structural extras
+  └─ §11 Test presence (warn)
 
 typescript/stylistic  (optional)
   └─ pure formatting-adjacent preferences not already owned by Biome formatter
@@ -218,24 +274,26 @@ export default defineConfig({
 
 ---
 
-## 12. What we deliberately leave out of the *language* baseline
+## 13. What we deliberately leave out of the *language* baseline
 
 - React / JSX a11y / hooks rules → `@code-invariants/react`
 - Node / security (fs, child_process) → security plugin or Semgrep
 - Import path aliases specific to one bundler → project config
 - Formatting (semicolons, quotes, width) → Biome/Oxlint formatter only
 - Framework data-fetching patterns (DataRegion, useQuery) → framework plugins
+- Advanced type patterns (`satisfies`, branded types, enum alternatives) → [nice-to-have](./typescript-nice-to-have.md)
 
 ---
 
-## 13. Implementation notes for agents
+## 14. Implementation notes for agents
 
-1. **Do not reimplement** Biome/typescript-eslint rules inside our engine. Document them, optionally verify they are enabled in the user’s Biome/ESLint config, and focus implementation effort on §8–§10.
+1. **Do not reimplement** Biome/typescript-eslint rules inside our engine. Document them, optionally verify they are enabled in the user’s Biome/ESLint config, and focus implementation effort on §8–§11.
 2. For §1, ship a `code-invariants init` that writes a strict `tsconfig` baseline and a check that fails if `strict` is off.
-3. For §9, integrate structural fingerprinting (dupehound-like) first; add embedding-based semantic similarity second.
-4. Every rule id above should become a stable, documented id in the plugin so configs remain portable.
-5. Prefer **error** for anything that has caused production bugs (any, floating promises, non-exhaustive switches, circular imports). Prefer **warn** for style and complexity until a team is ready to tighten.
+3. For §8, the architecture config is the source of truth; implement graph analysis once and share it across `no-deep-import`, `layer-hierarchy`, and cycle detection. dependency-cruiser / eslint-plugin-boundaries are valid inspiration or optional backends.
+4. For §10, integrate structural fingerprinting (dupehound-like) first; add embedding-based semantic similarity second.
+5. Every rule id above should become a stable, documented id in the plugin so configs remain portable.
+6. Prefer **error** for anything that has caused production bugs (any, floating promises, non-exhaustive switches, circular imports, deep imports). Prefer **warn** for style and complexity until a team is ready to tighten.
 
 ---
 
-*This ruleset is the TypeScript language baseline only. Framework plugins extend it; they do not replace it.*
+*This ruleset is the TypeScript language **must-have** baseline only. See [typescript-nice-to-have.md](./typescript-nice-to-have.md) for optional rules. Framework plugins extend this; they do not replace it.*
