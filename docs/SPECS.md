@@ -2,6 +2,38 @@
 
 This document defines the intended architecture, interfaces, and first set of rules so that a coding agent (or human) can implement the system without ambiguity.
 
+## Locked decisions (August 2026)
+
+These decisions are considered stable unless a major new constraint appears:
+
+1. **Consumption model**  
+   CLI-first (ESLint/Ruff-like). Selective execution is required:
+   ```bash
+   code-invariants check
+   code-invariants check --plugin react
+   code-invariants check --rule react/data-region-exhaustive
+   code-invariants check --exclude-plugin dry
+   code-invariants check --diff --plugin react
+   ```
+   Exit codes 0/1/2. JSON/SARIF output. Optional MCP server as a thin wrapper around the same engine. Official GitHub Action + pre-commit examples.
+
+2. **Configuration**  
+   Primary path is a typed `defineConfig` function (TypeScript) that provides IntelliSense, autocomplete, and runtime validation of unknown keys / mismatched rule ids. JSON/YAML remains supported for non-TS projects. Every rule is independently toggleable; installing a plugin does **not** force all of its rules on.
+
+3. **Core language & multi-language strategy**  
+   Core engine, CLI, MCP, and config system are written in **TypeScript**. Language frontends are separate packages that speak a stable, narrow protocol. Rules for a given language are written against that language’s native AST library (ts-morph for TypeScript, libCST/tree-sitter for Python, etc.). The core never imports language-specific AST types directly.
+
+4. **Plugins**  
+   First-class and user-writable. There is one explicit contract (see § Plugin contract). Plugins can be published as npm packages or loaded from local paths. Agent skills for creating and maintaining plugins are part of the deliverable.
+
+5. **Runtime helpers**  
+   Optional companion packages (e.g. `@code-invariants/react` shipping a reference `DataRegion`). Static rules work both with the official helpers and with equivalent structural patterns the user already has.
+
+6. **Scope of v1**  
+   High-quality TypeScript/React engine first. Python (and other languages) later, reusing the same core protocol.
+
+---
+
 ## 1. High-level architecture
 
 ```
@@ -13,7 +45,7 @@ This document defines the intended architecture, interfaces, and first set of ru
 ┌────────────────────────────▼────────────────────────────────┐
 │                     Rule Engine (core)                      │
 │  - loads rule plugins                                       │
-│  - walks AST / graph / embeddings                           │
+│  - orchestrates frontends                                   │
 │  - collects violations with location + fix hints            │
 └──────────────┬──────────────────────────────┬───────────────┘
                │                              │
@@ -21,7 +53,7 @@ This document defines the intended architecture, interfaces, and first set of ru
      │  Language Frontends│          │  Semantic Index   │
      │  - TypeScript      │          │  (vector store)   │
      │    (ts-morph)      │          │  for DRY checks   │
-     │  - Python          │          └───────────────────┘
+     │  - Python (later)  │          └───────────────────┘
      │    (libCST /       │
      │     tree-sitter)   │
      └────────────────────┘
@@ -31,121 +63,99 @@ This document defines the intended architecture, interfaces, and first set of ru
 
 - **Rule**: A named, configurable check that produces zero or more `Violation`s.
 - **Violation**: `{ ruleId, severity, file, range, message, suggestion? }`
-- **Frontend**: Language-specific AST / symbol provider.
-- **Index**: Optional persistent vector + structural index of the repository (updated on merge / on demand).
+- **Frontend**: Language-specific AST / symbol provider that implements the frontend protocol.
+- **Plugin**: A package that exports one or more rules (and optionally recommended configs) conforming to the plugin contract.
+- **Index**: Optional persistent vector + structural index of the repository.
 
-## 2. First-class rules (v1 targets)
+## 2. Plugin contract (explicit)
 
-### R1 — Query error handling (TypeScript / React)
-
-**Intent**: Every call to `useQuery` / `useMutation` (TanStack Query) must either:
-- provide a non-empty `onError` handler, **or**
-- be used inside a component that exhaustively handles the `isError` / `error` state (preferred modern pattern), **or**
-- be covered by a project-level global `QueryCache` `onError` that the rule can detect as configured.
-
-**Enforcement style**: AST walker that finds all `useQuery(...)` call expressions and inspects the options object + surrounding JSX / control flow.
-
-**Config knobs**:
-- `requireOnError: boolean` (legacy)
-- `allowGlobalHandler: boolean`
-- `frameworks: ["tanstack-query"]`
-
-### R2 — Exhaustive data states via compositional components
-
-**Intent**: Any page or component that performs a data query must render through a `DataRegion` (or equivalent) that forces the developer/agent to supply `.loading`, `.error`, and `.success` children.
-
-Example shape the rule should recognise and enforce:
-
-```tsx
-<DataRegion query={someQuery}>
-  <DataRegion.Loading>...</DataRegion.Loading>
-  <DataRegion.Error>...</DataRegion.Error>
-  <DataRegion.Success>...</DataRegion.Success>
-</DataRegion>
-```
-
-**Enforcement**:
-1. Detect files / components that call `useQuery` (or configured data hooks).
-2. Require that the returned JSX root (or a configured wrapper) is a `DataRegion`.
-3. Require that the three composition children are present exactly once.
-
-This is the canonical “higher-order compositional” rule that classic ESLint struggles with and that custom AST walkers excel at.
-
-### R3 — Semantic style tokens only
-
-**Intent**: `className` (and equivalent style props) may only receive values of a branded `StyleToken` type generated from the project’s design-system definition.
-
-**Enforcement**:
-- Generate / maintain a branded type from the design tokens source of truth.
-- Type-aware or AST rule that flags any `className={...}` whose static value is not a known token (or a concatenation of known tokens).
-- Optional: ban raw Tailwind arbitrary values or CSS-in-JS magic strings outside the token set.
-
-### R4 — Semantic DRY gate (proactive)
-
-**Intent**: Before an agent (or developer) commits a new top-level function / component / class, the system can be queried for semantically similar existing symbols. CI can also fail if a newly added symbol is too similar to an existing one above a configurable threshold.
-
-**Implementation sketch**:
-- On `index` command (or post-merge hook): embed all exported functions/components using a code embedding model (local preferred).
-- Store in a local vector DB (Chroma, LanceDB, sqlite-vss, etc.) keyed by symbol identity.
-- `query --similar "description or code snippet"` returns nearest neighbours with scores.
-- CI mode: for every newly added symbol in the diff, compute similarity; fail if > threshold and not in an allow-list / ignore file.
-
-Combine with structural fingerprinting (inspired by dupehound) for higher precision on near-clones.
-
-### R5 — Test presence (static)
-
-**Intent**: Every exported function, class, or React component must appear as a reference (call expression, JSX usage, etc.) inside at least one test file (`*.test.*`, `*.spec.*`, `__tests__/**`, etc.).
-
-**Enforcement**: Cross-file AST / symbol analysis. Complement (do not replace) runtime function coverage thresholds.
-
-### R6 — Architecture fitness (stretch for v1)
-
-Layer / folder dependency rules, cycle detection, naming conventions — largely already solved by ArchUnitTS, dependency-cruiser, etc. The value is offering a unified configuration surface and agent-friendly reporting.
-
-## 3. CLI interface (proposed)
-
-```bash
-npx code-invariants init          # create config + example rules
-npx code-invariants check         # run all enabled rules on the repo / changed files
-npx code-invariants check --rule R2
-npx code-invariants index         # (re)build the semantic + structural index
-npx code-invariants query --similar "user profile card with avatar"
-npx code-invariants report        # human + machine readable summary
-```
-
-Exit codes: 0 = clean, 1 = violations found, 2 = tool error.
-
-## 4. Configuration (proposed)
-
-`code-invariants.config.ts` or `.yml`:
+Every plugin must export an object matching this shape (TypeScript types will be published):
 
 ```ts
-export default {
-  languages: ["typescript", "python"],
-  rules: {
-    "query-error-handling": { enabled: true, ... },
-    "data-region-exhaustive": { enabled: true, componentName: "DataRegion" },
-    "semantic-style-tokens": { enabled: true, tokensPath: "./src/theme/tokens.ts" },
-    "semantic-dry": { enabled: true, threshold: 0.82, indexPath: ".code-invariants/index" },
-    "test-presence": { enabled: true },
-  },
-  include: ["src/**/*.{ts,tsx,py}"],
-  exclude: ["**/*.test.*", "**/generated/**"],
-};
+export interface Plugin {
+  name: string;                 // e.g. "react" or "@my-org/internal"
+  version?: string;
+  rules?: Record<string, Rule>;
+  configs?: {
+    recommended?: Partial<UserConfig>;
+  };
+}
+
+export interface Rule {
+  meta: {
+    docs: { description: string; url?: string };
+    schema?: JSONSchema;        // options validation
+    fixable?: "code" | "whitespace";
+  };
+  create(context: RuleContext): void | RuleListener;
+}
+
+export interface RuleContext {
+  id: string;
+  options: unknown;             // already validated against schema
+  report(violation: Omit<Violation, "ruleId">): void;
+  getSource(): SourceUnit;      // language-specific, typed by the frontend
+  getFilename(): string;
+  // additional helpers as needed
+}
 ```
 
-## 5. MCP server (agent integration)
+Rules never touch the filesystem or the CLI. They only receive a `RuleContext` and call `context.report`. This keeps them testable and isolatable.
 
-Expose at least:
+A custom plugin is simply an npm package (or local folder) that exports a `Plugin`. The core discovers it from the `plugins` array in the user’s config.
 
-- `check_file(path)` / `check_diff`
-- `query_similar(code_or_description)`
-- `list_violations`
-- `get_rule_docs(ruleId)`
+## 3. First-class rules (v1 targets)
 
-So that an agent can call the tools mid-generation and self-correct.
+### R1 — Query error handling (TypeScript / React)
+### R2 — Exhaustive data states via compositional components (DataRegion pattern)
+### R3 — Semantic style tokens only
+### R4 — Semantic DRY gate (proactive + CI)
+### R5 — Test presence (static)
+### R6 — Architecture fitness (stretch)
 
-## 6. Language support matrix (initial)
+(Details of each rule remain as previously specified.)
+
+## 4. CLI interface
+
+```bash
+code-invariants init
+code-invariants check
+code-invariants check --plugin react
+code-invariants check --rule react/data-region-exhaustive
+code-invariants check --exclude-plugin dry
+code-invariants check --diff
+code-invariants index
+code-invariants query --similar "..."
+code-invariants report
+```
+
+## 5. Configuration
+
+```ts
+import { defineConfig } from "code-invariants";
+
+export default defineConfig({
+  languages: ["typescript"],
+  plugins: [
+    "@code-invariants/react",
+    "./my-custom-plugin",
+  ],
+  rules: {
+    "react/data-region-exhaustive": "error",
+    "react/semantic-style-tokens": "off",
+  },
+  include: ["src/**/*.{ts,tsx}"],
+  exclude: ["**/*.test.*", "**/generated/**"],
+});
+```
+
+`defineConfig` performs both type-level and runtime validation.
+
+## 6. MCP server
+
+Thin wrapper exposing at least: `check_file`, `check_diff`, `query_similar`, `list_violations`, `get_rule_docs`.
+
+## 7. Language support matrix (initial)
 
 | Capability                    | TypeScript | Python |
 |-------------------------------|------------|--------|
@@ -156,17 +166,17 @@ So that an agent can call the tools mid-generation and self-correct.
 | Test-presence                 | Yes        | Yes     |
 | Architecture fitness          | Yes        | Yes     |
 
-## 7. Implementation notes for the first agent
+## 8. Agent skills (required deliverable)
 
-- Prefer `ts-morph` for the TypeScript frontend (already proven in the author’s prototype).
-- Keep rules as pure functions / classes that receive a `SourceFile` (or equivalent) + project context and return `Violation[]`.
-- Make the engine rule-plugin based from day one so new invariants can be added without touching the core.
-- Start with a single package; monorepo can come later if needed.
-- Tests for the rules themselves are mandatory (feed example good/bad code and assert on violations).
+- Skill for scaffolding a new plugin that obeys the contract
+- Skill for implementing and testing a rule against the TypeScript frontend
+- Skill for registering the plugin in a consumer config
+- Later: skills for filing issues and opening PRs against this repository
 
-## 8. Success metrics for v0.1
+## 9. Success metrics for v0.1
 
-- Three compositional rules (R1–R3) working on a real React + TanStack Query codebase.
-- CLI `check` that can be dropped into GitHub Actions and fails the build on violations.
-- Clear, actionable violation messages.
-- Basic documentation that lets another agent continue the work.
+- Three compositional rules (R1–R3) working on a real React + TanStack Query codebase
+- CLI `check` usable in GitHub Actions
+- Clear, actionable violation messages
+- Published plugin contract + at least one example custom plugin
+- Agent skills that allow another model to create a working plugin
