@@ -62,11 +62,13 @@ Full research notes and comparisons are in [docs/RESEARCH.md](docs/RESEARCH.md).
 
 This repository currently contains the **vision, specifications, and research documentation**. Implementation has not started yet.
 
+**Core architectural decisions are locked** in [docs/SPECS.md](docs/SPECS.md) (CLI shape, `defineConfig`, plugin contract, TypeScript-first core, no wrapping of Biome/ESLint, native AST per frontend, performance approach, etc.). An agent can treat those decisions as stable and start implementing against them.
+
 The original author has a working internal TypeScript/TSX prototype for several of the compositional rules. The goal of this public repo is to generalise it, add the missing pieces (semantic DRY, Python, agent integration, test-presence gates), and make it a proper open-source project that coding agents can build upon.
 
 ## Roadmap (High Level)
 
-1. **Phase 0** — Documentation & design (this PR / initial commits)
+1. **Phase 0** — Documentation & design ✅
 2. **Phase 1** — Core TypeScript engine (ts-morph based) + first set of compositional rules (useQuery error handling, DataRegion-style state exhaustiveness, semantic style tokens)
 3. **Phase 2** — CI integration, CLI, and basic MCP server so agents can query/check
 4. **Phase 3** — Semantic DRY layer (vector index + similarity gate)
@@ -81,16 +83,17 @@ This repository is intentionally structured so that a coding agent can pick it u
 Recommended first tasks for an agent:
 
 1. Read `docs/VISION.md`, `docs/SPECS.md`, and `docs/RESEARCH.md` thoroughly.
-2. Scaffold a TypeScript monorepo (or single package) with the core engine based on `ts-morph`.
-3. Implement the first three example rules as plugins.
-4. Add a simple CLI (`npx code-invariants check`) and GitHub Action.
-5. Add tests for the rules themselves.
+2. Treat the **Locked decisions** section in `docs/SPECS.md` as binding.
+3. Scaffold a TypeScript package with the core engine based on `ts-morph`.
+4. Implement the first three example rules as plugins that obey the published contract.
+5. Add a simple CLI (`npx code-invariants check`) with `--diff` / `--plugin` / `--rule` support and a GitHub Action.
+6. Add tests for the rules themselves.
 
 See `docs/SPECS.md` for precise interfaces and expected behaviour.
 
 ## License
 
-MIT (planned)
+MIT
 
 ---
 
