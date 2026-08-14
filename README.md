@@ -60,11 +60,27 @@ Full research notes and comparisons are in [docs/RESEARCH.md](docs/RESEARCH.md).
 
 ## Status
 
-This repository currently contains the **vision, specifications, and research documentation**. Implementation has not started yet.
+Implementation has started. The repository is a pnpm/TypeScript workspace with the published plugin contract (`packages/code-invariants/src/index.ts`) and a CLI skeleton; **no rules are implemented yet** — `code-invariants check` currently reports that nothing is configured.
 
 **Core architectural decisions are locked** in [docs/SPECS.md](docs/SPECS.md) (CLI shape, `defineConfig`, plugin contract, TypeScript-first core, no wrapping of Biome/ESLint, native AST per frontend, performance approach, etc.). An agent can treat those decisions as stable and start implementing against them.
 
 The original author has a working internal TypeScript/TSX prototype for several of the compositional rules. The goal of this public repo is to generalise it, add the missing pieces (semantic DRY, Python, agent integration, test-presence gates), and make it a proper open-source project that coding agents can build upon.
+
+## Development
+
+Requires Node >= 22 (CI runs 24, the active LTS). pnpm 11 is pinned via `packageManager`, so
+pnpm fetches the right version itself — no manual install needed.
+
+```bash
+pnpm install
+pnpm build   # tsc -b across the workspace
+pnpm test    # vitest
+pnpm check   # biome (lint + format)
+```
+
+Layout: one package (`packages/code-invariants`) holding the core, the CLI, and the public
+plugin types. It splits into separate packages when a second consumer appears — most likely
+with the Python frontend.
 
 ## Roadmap (High Level)
 
