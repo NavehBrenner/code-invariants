@@ -60,7 +60,7 @@ Full research notes and comparisons are in [docs/RESEARCH.md](docs/RESEARCH.md).
 
 ## Status
 
-Implementation has started. The repository is a pnpm/TypeScript workspace with the published plugin contract (`packages/code-invariants/src/index.ts`) and a CLI skeleton; **no rules are implemented yet** — `code-invariants check` currently reports that nothing is configured.
+Implementation has started. The repository is a pnpm/TypeScript workspace with the published plugin contract and `defineConfig`. `code-invariants check` loads config, parses TypeScript once (ts-morph), and runs enabled plugin rules. **No product rules ship yet** — with nothing configured it reports that honestly and exits 0.
 
 **Core architectural decisions are locked** in [docs/SPECS.md](docs/SPECS.md) (CLI shape, `defineConfig`, plugin contract, TypeScript-first core, no wrapping of Biome/ESLint, native AST per frontend, performance approach, etc.). An agent can treat those decisions as stable and start implementing against them.
 

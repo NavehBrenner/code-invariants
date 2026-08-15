@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
+import { check } from "./engine.ts";
 
 const USAGE = `code-invariants — executable code invariants
 
@@ -19,7 +20,12 @@ Exit codes: 0 clean, 1 violations found, 2 usage or internal error.`;
  * engine that actually honours them, so an accepted-but-ignored flag can never
  * make CI look green when it did nothing.
  */
-export function run(argv: string[], out = console.log, err = console.error): number {
+export async function run(
+  argv: string[],
+  out = console.log,
+  err = console.error,
+  cwd = process.cwd(),
+): Promise<number> {
   let positionals: string[];
   let values: { help?: boolean };
   try {
@@ -44,10 +50,9 @@ export function run(argv: string[], out = console.log, err = console.error): num
     return 2;
   }
 
-  out("No rules configured — nothing to check.");
-  return 0;
+  return check(cwd, out, err);
 }
 
 if (process.argv[1] && import.meta.filename === process.argv[1]) {
-  process.exitCode = run(process.argv.slice(2));
+  process.exitCode = await run(process.argv.slice(2));
 }

@@ -67,3 +67,5 @@ export interface Plugin {
     recommended?: Partial<UserConfig>;
   };
 }
+
+export { defineConfig } from "./config.ts";
