@@ -1,0 +1,14 @@
+# /etc/systemd/system/wpa-oc-auth.timer — 4h cadence against a ~6h token.
+# Persistent catches up a run the Pi slept through instead of leaving a stale
+# secret in the repo until the next boot + 4h.
+
+[Unit]
+Description=Refresh the opencode xAI OAuth token every 4h
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=4h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

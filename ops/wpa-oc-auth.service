@@ -1,0 +1,21 @@
+# /etc/systemd/system/wpa-oc-auth.service — system unit, not a user unit: systemd
+# reads the root-owned EnvironmentFile as root, then drops to User= to run the
+# script, so the service user never needs read access to the PAT.
+#
+# Install on the Pi:
+#   sudo install -m 755 ops/wpa-oc-auth /usr/local/bin/wpa-oc-auth
+#   sudo install -m 644 ops/wpa-oc-auth.service ops/wpa-oc-auth.timer /etc/systemd/system/
+#   sudo install -m 600 /dev/null /etc/wpa-oc.env && sudo editor /etc/wpa-oc.env
+#   sudo systemctl daemon-reload && sudo systemctl enable --now wpa-oc-auth.timer
+#
+# User= must be the account that ran `opencode auth login` — the script reads that
+# account's ~/.local/share/opencode/auth.json.
+
+[Unit]
+Description=Refresh opencode xAI OAuth token and publish it to GitHub repo secrets
+
+[Service]
+Type=oneshot
+User=pi
+EnvironmentFile=/etc/wpa-oc.env
+ExecStart=/usr/local/bin/wpa-oc-auth
