@@ -38,8 +38,29 @@ jobs:
           mkdir -p ~/.local/share/opencode
           install -m 600 /dev/null ~/.local/share/opencode/auth.json
           printf '%s' "$AUTH_JSON" > ~/.local/share/opencode/auth.json
+      # ⚠️ TEMPORARY, AND IT COSTS SOMETHING — see the PR that added these two lines.
+      #
+      # By default the action exchanges an OIDC token for an opencode-agent App token.
+      # That exchange is returning a non-JSON error body, which the action mishandles
+      # twice: `response.json()` is called inside the `!response.ok` branch (so the
+      # real status code is lost to "Failed to parse JSON"), and the catch block calls
+      # updateComment() using an Octokit assigned on the line *after* the throw (so it
+      # dies on `undefined is not an object (evaluating 'p.rest')`). Neither message
+      # names the actual failure.
+      #
+      # The App itself is fine: installed, repository_selection "selected", not
+      # suspended, with issues/contents/pull_requests write. So this bypasses the
+      # exchange rather than fixing it.
+      #
+      # WHAT IT COSTS: events created with GITHUB_TOKEN do not trigger workflows, so
+      # ci.yml will NOT run on PRs opencode opens. That is the whole reason the App
+      # path was chosen. Revert once the exchange works, or swap GITHUB_TOKEN for a
+      # PAT so its PRs are checked.
       - uses: anomalyco/opencode/github@v1.18.18
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          use_github_token: true
           model: xai/grok-4.6
           # ponytail: plan/build split is one expression, not two workflow files
           agent: ${{ contains(github.event.comment.body, '/oc plan') && 'plan' || 'build' }}
