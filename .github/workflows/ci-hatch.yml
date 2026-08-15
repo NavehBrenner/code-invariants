@@ -1,0 +1,33 @@
+name: ci hatch
+
+# `/ci` on a pull request runs ci.yml against that PR's branch, so `build` reports
+# on the head SHA and the merge box unblocks.
+#
+# Why this can work at all: workflow_dispatch and repository_dispatch are the only
+# two events GitHub will still fire when they originate from a job's GITHUB_TOKEN.
+# Everything else is suppressed to prevent recursive workflow runs — which is the
+# whole reason a PR opened by GITHUB_TOKEN never gets checked in the first place.
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  dispatch:
+    if: |
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/ci') &&
+      github.event.comment.user.login == 'NavehBrenner'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write # gh workflow run
+      pull-requests: read # resolve the PR's head branch
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.issue.number }}
+        run: |
+          ref=$(gh pr view "$PR" --repo "$REPO" --json headRefName --jq .headRefName)
+          echo "dispatching ci.yml on $ref"
+          gh workflow run ci.yml --repo "$REPO" --ref "$ref"
