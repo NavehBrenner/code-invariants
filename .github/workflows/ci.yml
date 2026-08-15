@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # break-glass: lets ci-hatch.yml (or `gh workflow run ci.yml --ref <branch>`)
+  # report `build` on a branch whose PR never got an automatic run.
+  workflow_dispatch:
 
 jobs:
   build:

@@ -21,16 +21,36 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      id-token: write
       contents: write
       pull-requests: write
       issues: write
     steps:
+      # Our own App, not opencode's. The action's default path trades an OIDC token
+      # for an opencode-agent App token via api.opencode.ai, and that exchange is
+      # returning a non-JSON error body it then mishandles. Minting the token here
+      # cuts that service out of the path entirely while keeping the property that
+      # actually matters: an App token is a distinct identity, so the PRs it opens
+      # DO trigger ci.yml. The per-job GITHUB_TOKEN does not, and a required check
+      # that never reports blocks the merge forever.
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          app-id: ${{ secrets.OPENCODE_APP_ID }}
+          private-key: ${{ secrets.OPENCODE_APP_PRIVATE_KEY }}
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0 # agent needs history to branch/rebase
-      # access token only — the refresh token is stripped before this secret is
-      # published, so a runner can read xAI but cannot rotate the grant.
+          token: ${{ steps.app-token.outputs.token }} # so pushes are App-attributed too
+      # use_github_token skips the action's configureGit(), which is what would
+      # normally set these. Without them `git commit` dies on an unknown author.
+      - name: git identity
+        run: |
+          git config --global user.name 'opencode-agent[bot]'
+          git config --global user.email 'opencode-agent[bot]@users.noreply.github.com'
+      # Access token only — the refresh token is blanked before this secret is
+      # published, so a runner can read xAI but cannot rotate the grant. It is
+      # blanked rather than deleted because opencode's auth schema requires the
+      # key and silently drops any credential that fails to decode.
       - name: restore opencode auth
         env:
           AUTH_JSON: ${{ secrets.OPENCODE_AUTH_JSON }}
@@ -38,27 +58,9 @@ jobs:
           mkdir -p ~/.local/share/opencode
           install -m 600 /dev/null ~/.local/share/opencode/auth.json
           printf '%s' "$AUTH_JSON" > ~/.local/share/opencode/auth.json
-      # ⚠️ TEMPORARY, AND IT COSTS SOMETHING — see the PR that added these two lines.
-      #
-      # By default the action exchanges an OIDC token for an opencode-agent App token.
-      # That exchange is returning a non-JSON error body, which the action mishandles
-      # twice: `response.json()` is called inside the `!response.ok` branch (so the
-      # real status code is lost to "Failed to parse JSON"), and the catch block calls
-      # updateComment() using an Octokit assigned on the line *after* the throw (so it
-      # dies on `undefined is not an object (evaluating 'p.rest')`). Neither message
-      # names the actual failure.
-      #
-      # The App itself is fine: installed, repository_selection "selected", not
-      # suspended, with issues/contents/pull_requests write. So this bypasses the
-      # exchange rather than fixing it.
-      #
-      # WHAT IT COSTS: events created with GITHUB_TOKEN do not trigger workflows, so
-      # ci.yml will NOT run on PRs opencode opens. That is the whole reason the App
-      # path was chosen. Revert once the exchange works, or swap GITHUB_TOKEN for a
-      # PAT so its PRs are checked.
       - uses: anomalyco/opencode/github@v1.18.18
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
         with:
           use_github_token: true
           model: xai/grok-4.6
