@@ -1,0 +1,21 @@
+name: verify app token
+on: pull_request
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - uses: actions/create-github-app-token@v3
+        id: t
+        with:
+          app-id: ${{ secrets.OPENCODE_APP_ID }}
+          private-key: ${{ secrets.OPENCODE_APP_PRIVATE_KEY }}
+      - env:
+          GH_TOKEN: ${{ steps.t.outputs.token }}
+        run: |
+          echo "--- identity ---"
+          gh api /installation/repositories --jq '"app: \(.repositories[0].full_name) reachable"'
+          echo "--- repos this installation covers ---"
+          gh api /installation/repositories --jq '.repositories[].full_name'
+          echo "--- granted permissions ---"
+          gh api /installation/repositories -i 2>/dev/null | grep -i '^x-accepted' || true
