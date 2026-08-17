@@ -30,9 +30,9 @@ test("defineConfig rejects unknown keys", () => {
 });
 
 test("defineConfig rejects invalid severity", () => {
-  expect(() => validateConfig({ ...valid, rules: { "ts/no-deep-import": "fatal" } })).toThrow(
-    /Invalid severity for "ts\/no-deep-import"/,
-  );
+  expect(() =>
+    validateConfig({ ...valid, rules: { "ts/public-exports-tested": "fatal" } }),
+  ).toThrow(/Invalid severity for "ts\/public-exports-tested"/);
 });
 
 test("defineConfig requires languages, plugins, and rules", () => {

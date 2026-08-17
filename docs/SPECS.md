@@ -25,7 +25,8 @@ These decisions are considered stable unless a major new constraint appears:
 
 4. **Plugins**  
    First-class and user-writable. There is one explicit contract (see § Plugin contract). Plugins can be published as npm packages or loaded from local paths. Agent skills for creating and maintaining plugins are part of the deliverable.  
-   **v1 plugin language is TypeScript only.** Plugins are TypeScript/JavaScript packages that export the `Plugin` interface. Python-written plugins may be supported later via the same protocol once a Python frontend exists.
+   **v1 plugin language is TypeScript only.** Plugins are TypeScript/JavaScript packages that export the `Plugin` interface. Python-written plugins may be supported later via the same protocol once a Python frontend exists.  
+   **Core has no built-in rule bag.** Every check is a plugin rule. Core is the engine, language frontends, config/CLI, and (later) the index — not a default catalog. Baseline TypeScript rules live in `@code-invariants/typescript` (`Plugin.name: "ts"`). A plugin may ship `configs.recommended`; installing a plugin does **not** enable its rules (locked #2).
 
 5. **Runtime helpers**  
    Optional companion packages (e.g. `@code-invariants/react` shipping a reference `DataRegion`). Static rules work both with the official helpers and with equivalent structural patterns the user already has.
@@ -35,6 +36,12 @@ These decisions are considered stable unless a major new constraint appears:
 
 7. **Relationship to classic linters/formatters**  
    `code-invariants` is the *higher-order* layer. It does **not** wrap, re-implement, or own configuration for Biome, ESLint, Prettier, Oxlint, or Ruff. Users are expected to run a fast linter/formatter of their choice. We may later offer a thin convenience flag that invokes the user’s existing Biome/ESLint config and then runs our rules, but we never own those tools’ configuration or rule sets. Custom plugins that need classic lint/format results should call those tools themselves.
+
+   **TypeScript baseline — what we own:** `ts/public-exports-tested` (static R5-lite). Later plugins may add compositional React (R1/R2), semantic tokens (R3), and index-backed DRY (R4). Architecture fitness only if we add something ArchUnit / dependency-cruiser do not already cover.
+
+   **What we do not own** (use Biome, ESLint, or dependency-cruiser): circular imports; max relative import depth; simple path bans (`dist/`, `generated/`, …); deep-import / internal-module bans; generic layer charts those tools already do well.
+
+   **Overlap family:** `import-boundary` / layers / no-import-from / no-deep-import / max-relative-depth are one policy family. The v1 TypeScript plugin catalogs **none** of them unless a future WP proves a unique agent-facing gap. Prefer configuring Biome + dependency-cruiser over reimplementation.
 
 8. **Two rule kinds / two pipelines**  
    No unified cross-language AST. Same product idea on two languages ⇒ **two language rules**, not one multi-AST rule. Rules declare `meta.kind` with **no default** (`"language"` | `"project"`). Missing or invalid kind is a load/check error (exit 2).
@@ -163,7 +170,7 @@ Language rules: `create` is invoked once per enabled rule **per language**, not 
 
 Enabled language rule whose `languages` do not intersect `config.languages` is an error (do not silently skip). A language listed on an enabled rule with no frontend is an error. `requires` on a language rule is an error. Missing/invalid `kind` or empty `languages` on a language rule is an error.
 
-A custom plugin is simply an npm package (or local folder) that exports a `Plugin`. The core discovers it from the `plugins` array in the user’s config.
+A custom plugin is simply an npm package (or local folder) that exports a `Plugin`. The core discovers it from the `plugins` array in the user’s config. Core never ships a default rule table; a rule exists only if a loaded plugin lists it. Installing `@code-invariants/typescript` (or any plugin) does not enable rules until they appear in `config.rules`. `configs.recommended` is an optional preset the user copies in — the engine does not apply it on install.
 
 **v1 constraint**: plugins are authored in TypeScript/JavaScript only.
 
@@ -174,9 +181,42 @@ A custom plugin is simply an npm package (or local folder) that exports a `Plugi
 ### R3 — Semantic style tokens only
 ### R4 — Semantic DRY gate (proactive + CI)
 ### R5 — Test presence (static)
+
+Implemented in `@code-invariants/typescript` as **`ts/public-exports-tested`**.  
+`kind: "language"`, `languages: ["typescript"]`. Coverage tools are out of scope for this check.
+
+**Intent:** Every **public** value export in included non-test sources must be referenced at least once from a **test** path.
+
+| Topic | Decision |
+|--------|----------|
+| Public export | Value exports in non-test, non-`.d.ts` files already in the language pipeline: `export function` / `class` / `const` / `let` / `var` / `enum`, `export default`, `export { name }`, `export { name } from`. Name for default is `"default"`. |
+| Skip | Type-only (`export type`, `export interface`, `export { type X }`). `export *` / `export * as ns`. `export =`. Ambient `.d.ts`. Exports in test paths. |
+| Test path (not configurable in v1) | File is in the language pipeline, and basename matches `*.test.*` / `*.spec.*`, or a path segment is `__tests__`. |
+| Reference | Test-file import whose specifier **resolves relatively** (`.ts` / `.tsx` / `.mts` / `.cts` + `index`) to the exporting file in `getSources()`, and the import binds that export name (named) or is a default import (`default`). `import *` does not satisfy named exports. Bare specifiers / dynamic `import()` do not count in v1. |
+| Barrel + source | If both `impl.ts` (`export const x`) and `barrel.ts` (`export { x } from "./impl"`) are in the language set, a test import from the barrel satisfies **only** the barrel export, not impl’s own public export. Each public surface needs its own test reference. |
+| Scope | Include/exclude only. No index. **Tests must not be excluded** or every export fails. This rule only sees files in the language pipeline; a default/global `exclude` of `**/*.test.*` / `**/*.spec.*` wipes the reference sources. Production excludes (`**/generated/**`, `**/dist/**`) are fine. Recommended and example configs keep tests in the set. |
+| Violation | `ruleId` `ts/public-exports-tested`; location on the export; message names the export and file; suggestion: import it from a test. |
+| Recommended | `configs.recommended.rules["ts/public-exports-tested"] = "error"`. Install does **not** apply recommended (locked #2 / #4). |
+
+See [docs/rulesets/typescript.md](./rulesets/typescript.md).
+
 ### R6 — Architecture fitness (stretch)
 
-(Details of each rule remain as previously specified.)
+(Details of R1–R4 and R6 remain as previously specified.)
+
+### v1 TypeScript plugin catalog
+
+`@code-invariants/typescript` (`name: "ts"`) ships only:
+
+| Rule | Status |
+|------|--------|
+| `ts/public-exports-tested` | Implemented (this section) |
+
+**Not catalogued** (do not implement in this plugin): circular imports, max relative import depth, simple path bans, deep-import / internal-module bans, generic layer charts. Use Biome / ESLint / dependency-cruiser.
+
+**Overlap family:** `import-boundary` / layers / no-import-from / no-deep-import / max-relative-depth — catalog **none**.
+
+React / compositional R1–R3 are **not** TypeScript-baseline; they belong in a later `@code-invariants/react` (or similar).
 
 ## 4. CLI interface
 
@@ -200,19 +240,20 @@ import { defineConfig } from "code-invariants";
 export default defineConfig({
   languages: ["typescript"],
   plugins: [
-    "@code-invariants/react",
+    "@code-invariants/typescript",
     "./my-custom-plugin",
   ],
   rules: {
-    "react/data-region-exhaustive": "error",
-    "react/semantic-style-tokens": "off",
+    "ts/public-exports-tested": "error",
   },
   include: ["src/**/*.{ts,tsx}"],
-  exclude: ["**/*.test.*", "**/generated/**"],
+  exclude: ["**/generated/**"],
 });
 ```
 
 `defineConfig` performs both type-level and runtime validation.
+
+**Do not exclude test paths** (`**/*.test.*`, `**/*.spec.*`, `__tests__/**`) when `ts/public-exports-tested` is enabled. The rule only sees files in the language pipeline; wiping tests from the set makes every public export fail. Keep tests in `include`. Default exclude is `node_modules` and `dist` only.
 
 ## 6. MCP server
 

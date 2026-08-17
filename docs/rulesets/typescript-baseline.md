@@ -1,5 +1,8 @@
 # TypeScript baseline ruleset (must-have)
 
+> **This file is a research inventory, not an implementation backlog.**  
+> The v1 TypeScript plugin catalog is [typescript.md](./typescript.md). `@code-invariants/typescript` ships `ts/public-exports-tested` only. §8 module-separation / import-boundary rules are **not** owned by this plugin — use Biome, ESLint, or dependency-cruiser (SPECS locked #7).
+
 Language-level invariants for TypeScript (no framework-specific rules).  
 This is the foundation every TypeScript project should get from `code-invariants` before React, Node, or other plugins are layered on.
 
@@ -148,9 +151,11 @@ Align with Google TS style + common ecosystem practice. Enforce via lint where p
 
 ## 8. Module separation, public API, and layer hierarchy
 
+> **Not a v1 product commitment.** Research only. `@code-invariants/typescript` does **not** implement these rules and must not grow an import-lint clone catalog. Use Biome, ESLint (`import/no-internal-modules`), package `exports`, and dependency-cruiser. See [typescript.md](./typescript.md) and SPECS locked #7.
+
 Good codebases are split by **concern** (feature / domain / layer). Each piece exposes a **public API** (typically a barrel `index.ts` or package entrypoint). Cross-boundary imports go **only** through that public API. Dependencies form a **strict stack hierarchy**: higher layers may import lower ones; the reverse is forbidden.
 
-This is a first-class responsibility of `code-invariants` (same family as dependency-cruiser, eslint-plugin-boundaries, ArchUnit, Sheriff, Feature-Sliced Design public-API rules).
+This family overlaps dependency-cruiser, eslint-plugin-boundaries, ArchUnit, Sheriff, and Feature-Sliced Design public-API rules. We do **not** re-own it in v1.
 
 | ID | Intent | Enforcement | Default |
 |----|--------|-------------|--------|
@@ -228,7 +233,7 @@ Projects that do not configure `architecture` skip layer/module rules (or get a 
 
 | ID | Intent | Enforcement | Default |
 |----|--------|-------------|--------|
-| `ts/export-must-be-referenced-in-tests` | Every exported function/class/type-guard from `src` appears in at least one test file (static reference) | `code-invariants` | warn |
+| `ts/public-exports-tested` | Every public value export in included non-test sources is referenced from a test path (static; not coverage). **Do not exclude test paths** when this rule is enabled. | `code-invariants` (`@code-invariants/typescript`) | error |
 | `ts/function-coverage-threshold` | Runtime function coverage ≥ configured threshold (e.g. 80%) | coverage tool (vitest/c8) gated by CI | error |
 
 Note: coverage is necessary but not sufficient; the static reference check catches “never imported in tests” even when coverage tools are misconfigured.
@@ -287,12 +292,11 @@ export default defineConfig({
 
 ## 14. Implementation notes for agents
 
-1. **Do not reimplement** Biome/typescript-eslint rules inside our engine. Document them, optionally verify they are enabled in the user’s Biome/ESLint config, and focus implementation effort on §8–§11.
-2. For §1, ship a `code-invariants init` that writes a strict `tsconfig` baseline and a check that fails if `strict` is off.
-3. For §8, the architecture config is the source of truth; implement graph analysis once and share it across `no-deep-import`, `layer-hierarchy`, and cycle detection. dependency-cruiser / eslint-plugin-boundaries are valid inspiration or optional backends.
-4. For §10, integrate structural fingerprinting (dupehound-like) first; add embedding-based semantic similarity second.
-5. Every rule id above should become a stable, documented id in the plugin so configs remain portable.
-6. Prefer **error** for anything that has caused production bugs (any, floating promises, non-exhaustive switches, circular imports, deep imports). Prefer **warn** for style and complexity until a team is ready to tighten.
+1. **Do not reimplement** Biome/typescript-eslint/dependency-cruiser rules. This file is research. Implement only ids listed in [typescript.md](./typescript.md).
+2. Do **not** catalog or implement the §8 overlap family (`no-deep-import`, layers, cycles, path bans) in `@code-invariants/typescript`.
+3. For §11, the implemented id is `ts/public-exports-tested`. Keep test files in the language pipeline include set.
+4. For §10, structural fingerprinting / embeddings are later index work — not this plugin.
+5. Prefer **error** for the shipped test-presence rule. Style and complexity stay with the user’s linter.
 
 ---
 
