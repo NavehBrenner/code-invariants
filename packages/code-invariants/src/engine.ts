@@ -2,13 +2,28 @@ import { glob } from "node:fs/promises";
 import { basename, dirname, extname, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { CONFIG_FILENAMES, ConfigError, loadConfig } from "./config.ts";
-import { createFrontend } from "./frontend.ts";
-import type { Plugin, Rule, Severity, SourceUnit, UserConfig, Violation } from "./index.ts";
+import { createFrontend, hasFrontend } from "./frontend.ts";
+import type {
+  LanguageRule,
+  Plugin,
+  ProjectRule,
+  Rule,
+  Severity,
+  SourceUnit,
+  UserConfig,
+  Violation,
+} from "./index.ts";
 
 const NOTHING_TO_CHECK = "No rules configured — nothing to check.";
 const DEFAULT_INCLUDE = ["**/*.ts", "**/*.tsx", "**/*.mts", "**/*.cts"];
 const DEFAULT_EXCLUDE = ["**/node_modules/**", "**/dist/**"];
 const TS_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
+
+type Enabled<T extends Rule> = {
+  id: string;
+  severity: Exclude<Severity, "off">;
+  rule: T;
+};
 
 export async function check(
   cwd: string,
@@ -43,34 +58,82 @@ async function runCheck(cwd: string, out: (msg: string) => void): Promise<number
     return 0;
   }
 
-  const frontend = frontendFor(config.languages);
-  const files = await listFiles(cwd, config);
-  if (files.length === 0) {
+  const { languageRules, projectRules } = partitionEnabled(enabled, config.languages);
+
+  const langPipelines: { language: string; rules: Enabled<LanguageRule>[]; files: string[] }[] = [];
+  for (const language of config.languages) {
+    const matching = languageRules.filter((item) => item.rule.meta.languages.includes(language));
+    if (matching.length === 0) {
+      continue;
+    }
+    langPipelines.push({
+      language,
+      rules: matching,
+      files: await listLanguageFiles(cwd, config),
+    });
+  }
+
+  const workspaceFiles =
+    projectRules.length > 0 ? await listWorkspaceFiles(cwd, config) : undefined;
+  const anyFiles =
+    langPipelines.some((pipeline) => pipeline.files.length > 0) ||
+    (workspaceFiles !== undefined && workspaceFiles.length > 0);
+  if (!anyFiles) {
     out("No files to check.");
     return 0;
   }
 
-  const parsed = frontend.parseFiles(files);
-  const displayPaths = files.map((abs) => displayPath(cwd, abs));
-  const lookup = createSourceLookup(parsed.sources, cwd);
   const violations: Violation[] = [];
-  for (const item of enabled) {
-    item.rule.create({
-      id: item.id,
-      options: undefined,
-      getProject: () => parsed.project,
-      getSources: () => parsed.sources,
-      getFilenames: () => displayPaths,
-      getSource: (name) => lookup(name),
-      report(violation) {
-        violations.push({
-          ...violation,
-          ruleId: item.id,
-          severity: item.severity,
-          file: displayPath(cwd, violation.file),
-        });
-      },
+  const report = (item: Enabled<Rule>, violation: Omit<Violation, "ruleId">) => {
+    violations.push({
+      ...violation,
+      ruleId: item.id,
+      severity: item.severity,
+      file: displayPath(cwd, violation.file),
     });
+  };
+
+  for (const pipeline of langPipelines) {
+    if (pipeline.files.length === 0) {
+      continue;
+    }
+    const frontend = createFrontend(pipeline.language);
+    if (frontend === undefined) {
+      const requiredBy = pipeline.rules[0]?.id ?? pipeline.language;
+      throw new ConfigError(`No frontend for ${pipeline.language} (required by ${requiredBy}).`);
+    }
+    const parsed = frontend.parseFiles(pipeline.files);
+    const displayPaths = pipeline.files.map((abs) => displayPath(cwd, abs));
+    const lookup = createSourceLookup(parsed.sources, cwd);
+    for (const item of pipeline.rules) {
+      item.rule.create({
+        id: item.id,
+        options: undefined,
+        language: pipeline.language,
+        getProject: () => parsed.project,
+        getSources: () => parsed.sources,
+        getFilenames: () => displayPaths,
+        getSource: (name) => lookup(name),
+        report(violation) {
+          report(item, violation);
+        },
+      });
+    }
+  }
+
+  if (workspaceFiles !== undefined && workspaceFiles.length > 0) {
+    const displayPaths = workspaceFiles.map((abs) => displayPath(cwd, abs));
+    for (const item of projectRules) {
+      item.rule.create({
+        id: item.id,
+        options: undefined,
+        getCwd: () => cwd,
+        getFiles: () => displayPaths,
+        report(violation) {
+          report(item, violation);
+        },
+      });
+    }
   }
 
   violations.sort(compareViolations);
@@ -116,10 +179,7 @@ function isPlugin(value: unknown): value is Plugin {
   return typeof rec.name === "string";
 }
 
-function resolveEnabledRules(
-  plugins: Plugin[],
-  rules: Record<string, Severity>,
-): { id: string; severity: Exclude<Severity, "off">; rule: Rule }[] {
+function resolveEnabledRules(plugins: Plugin[], rules: Record<string, Severity>): Enabled<Rule>[] {
   const catalog = new Map<string, Rule>();
   for (const plugin of plugins) {
     for (const [name, rule] of Object.entries(plugin.rules ?? {})) {
@@ -132,7 +192,7 @@ function resolveEnabledRules(
       `Unknown rule id${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")}. No loaded plugin defines ${unknown.length > 1 ? "these rules" : "this rule"}.`,
     );
   }
-  const enabled: { id: string; severity: Exclude<Severity, "off">; rule: Rule }[] = [];
+  const enabled: Enabled<Rule>[] = [];
   for (const [id, severity] of Object.entries(rules)) {
     if (severity === "off") {
       continue;
@@ -146,27 +206,113 @@ function resolveEnabledRules(
   return enabled;
 }
 
-function frontendFor(languages: string[]) {
-  if (languages.includes("typescript")) {
-    const frontend = createFrontend("typescript");
-    if (frontend !== undefined) {
-      return frontend;
+function partitionEnabled(
+  enabled: Enabled<Rule>[],
+  configLanguages: string[],
+): { languageRules: Enabled<LanguageRule>[]; projectRules: Enabled<ProjectRule>[] } {
+  const languageRules: Enabled<LanguageRule>[] = [];
+  const projectRules: Enabled<ProjectRule>[] = [];
+  for (const item of enabled) {
+    const meta = asMeta(item.rule);
+    const kind = meta.kind;
+    if (kind !== "language" && kind !== "project") {
+      throw new ConfigError(
+        `Rule "${item.id}" meta.kind must be "language" or "project"${kind === undefined ? "" : `; got ${JSON.stringify(kind)}`}.`,
+      );
+    }
+    if (kind === "language") {
+      validateLanguageMeta(item.id, meta, configLanguages);
+      languageRules.push(item as Enabled<LanguageRule>);
+    } else {
+      validateProjectMeta(item.id, meta);
+      projectRules.push(item as Enabled<ProjectRule>);
     }
   }
-  const listed = languages.length > 0 ? languages.join(", ") : "(none)";
-  throw new ConfigError(`No frontend available for languages: ${listed}`);
+  return { languageRules, projectRules };
 }
 
-async function listFiles(cwd: string, config: UserConfig): Promise<string[]> {
+function asMeta(rule: Rule): Record<string, unknown> {
+  const meta = (rule as { meta?: unknown }).meta;
+  if (meta === null || typeof meta !== "object" || Array.isArray(meta)) {
+    return {};
+  }
+  return meta as Record<string, unknown>;
+}
+
+function validateLanguageMeta(
+  id: string,
+  meta: Record<string, unknown>,
+  configLanguages: string[],
+): void {
+  const languages = meta.languages;
+  if (
+    !Array.isArray(languages) ||
+    languages.length === 0 ||
+    languages.some((item) => typeof item !== "string")
+  ) {
+    throw new ConfigError(`Rule "${id}" kind "language" requires a non-empty languages array.`);
+  }
+  if ("requires" in meta && meta.requires !== undefined) {
+    throw new ConfigError(`Rule "${id}" is a language rule and must not set requires.`);
+  }
+  const intersection = languages.filter((language) => configLanguages.includes(language));
+  if (intersection.length === 0) {
+    const configured = configLanguages.length > 0 ? configLanguages.join(", ") : "(none)";
+    throw new ConfigError(
+      `Rule "${id}" languages (${languages.join(", ")}) do not intersect config.languages (${configured}).`,
+    );
+  }
+  for (const language of intersection) {
+    if (!hasFrontend(language)) {
+      throw new ConfigError(`No frontend for ${language} (required by ${id}).`);
+    }
+  }
+}
+
+function validateProjectMeta(id: string, meta: Record<string, unknown>): void {
+  const requires = meta.requires;
+  if (requires === undefined) {
+    return;
+  }
+  if (!Array.isArray(requires) || requires.some((item) => typeof item !== "string")) {
+    throw new ConfigError(
+      `Rule "${id}" has invalid requires; must be an array of known capability names.`,
+    );
+  }
+  for (const capability of requires) {
+    if (capability !== "index") {
+      throw new ConfigError(
+        `Rule "${id}" has invalid requires value: ${JSON.stringify(capability)}.`,
+      );
+    }
+  }
+  if (requires.includes("index")) {
+    throw new ConfigError(`Index not implemented (required by ${id}).`);
+  }
+}
+
+async function listLanguageFiles(cwd: string, config: UserConfig): Promise<string[]> {
+  return collectFiles(cwd, config, true);
+}
+
+async function listWorkspaceFiles(cwd: string, config: UserConfig): Promise<string[]> {
+  return collectFiles(cwd, config, false);
+}
+
+async function collectFiles(cwd: string, config: UserConfig, tsOnly: boolean): Promise<string[]> {
   const include = config.include ?? DEFAULT_INCLUDE;
   const exclude = [...new Set([...(config.exclude ?? DEFAULT_EXCLUDE), ...DEFAULT_EXCLUDE])];
   const found = new Set<string>();
   for (const pattern of include) {
     for await (const entry of glob(pattern, { cwd, exclude })) {
       const abs = resolve(cwd, entry);
-      if (hasTsExtension(abs) && !isConfigFilename(abs)) {
-        found.add(abs);
+      if (isConfigFilename(abs)) {
+        continue;
       }
+      if (tsOnly && !hasTsExtension(abs)) {
+        continue;
+      }
+      found.add(abs);
     }
   }
   return [...found].sort();
