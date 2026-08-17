@@ -10,13 +10,13 @@ Add **one** rule to an existing plugin, with fixtures and tests.
 ## Inputs
 
 - Target **plugin**
-- **Rule id** (stable, e.g. `ts/no-deep-import` or `react/data-region-exhaustive`)
+- **Rule id** (stable, e.g. `ts/public-exports-tested` or `react/data-region-exhaustive`)
 - Short **intent** (one sentence)
 - Optional: severity default, links to ruleset section
 
 ## Steps
 
-1. Confirm the rule belongs in this plugin (language baseline vs framework vs architecture).
+1. Confirm the rule belongs in this plugin (language baseline vs framework vs architecture). Do **not** add import-boundary / layers / no-deep-import / cycle / path-ban rules to `@code-invariants/typescript` (SPECS locked #7).
 2. Implement `Rule` with **no default `kind`**:
    - `meta.kind: "language"` **or** `"project"` (required)
    - Language: set `meta.languages` (non-empty, e.g. `["typescript"]`); `create` uses `LanguageRuleContext` (`getProject` / `getSources` / `getSource` / `getFilenames`). Same idea on two languages ⇒ two language rules.

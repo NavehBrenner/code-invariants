@@ -1,0 +1,8 @@
+{
+  "languages": ["typescript"],
+  "plugins": ["../../dist/index.js"],
+  "rules": {
+    "ts/public-exports-tested": "error"
+  },
+  "exclude": ["**/dropped.ts"]
+}

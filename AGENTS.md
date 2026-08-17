@@ -7,21 +7,23 @@
 
 `code-invariants` turns high-level engineering standards into **executable CI checks** so AI coding agents (and humans) get structural quality without relying on prose instructions or manual review of large diffs.
 
-It sits **above** formatters and classic linters: compositional AST rules, module/layer boundaries, structural DRY, test-presence gates. Not a SAST product; not a reimplementation of Biome/ESLint.
+It sits **above** formatters and classic linters: plugin rules (compositional AST, test-presence). Not a SAST product; not a reimplementation of Biome/ESLint. Core has **no built-in rule bag** — every check is a plugin rule. Baseline TypeScript lives in `@code-invariants/typescript`.
 
 ## What to read before coding
 
 1. [docs/SPECS.md](docs/SPECS.md) — **Locked decisions** are binding until changed by review.
 2. [docs/VISION.md](docs/VISION.md) — why and success criteria.
 3. [docs/RESEARCH.md](docs/RESEARCH.md) — competitive context (Semgrep, dupehound, etc.).
-4. [docs/rulesets/](docs/rulesets/) — TypeScript must-have vs nice-to-have rules (product content, not agent style guides).
+4. [docs/rulesets/typescript.md](docs/rulesets/typescript.md) — honest TypeScript plugin catalog (implemented vs not planned).
+5. [docs/rulesets/](docs/rulesets/) — research inventories are **not** an implementation backlog.
 
-Do **not** treat this repo’s future self-checks as a substitute for reading SPECS while the engine is still incomplete.
+Do **not** invent import-lint / cycle / path-ban rules or a long TypeScript catalog. Add rules to plugins; do not grow a core rule table.
 
 ## How to build (process, not style)
 
 - Implement against the **plugin contract** and CLI surface in SPECS — do not invent parallel APIs.
 - Prefer **extending plugins** over growing core, unless the change is shared infrastructure (frontend protocol, config, reporting).
+- First product plugin is `@code-invariants/typescript`. Do not re-scaffold the engine.
 - **One coherent change per PR** (one rule, one engine slice, or one docs theme).
 - Add **fixtures** (valid + invalid) for every rule; messages must be actionable by another agent.
 - Dogfood: once `code-invariants check` exists, run it on this repo.

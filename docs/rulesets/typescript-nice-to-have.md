@@ -1,5 +1,8 @@
 # TypeScript nice-to-have ruleset
 
+> **This file is a research inventory, not an implementation backlog.**  
+> The v1 TypeScript plugin catalog is [typescript.md](./typescript.md). Do not treat ids here as rules to add to `@code-invariants/typescript`.
+
 Optional / advanced TypeScript practices **not** required in the [baseline (must-have)](./typescript-baseline.md).
 
 Use these when a team wants a higher bar, library-quality public APIs, or stronger domain modeling. Defaults in our presets are **`off`** or **`warn`** unless noted.

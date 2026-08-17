@@ -60,9 +60,9 @@ Full research notes and comparisons are in [docs/RESEARCH.md](docs/RESEARCH.md).
 
 ## Status
 
-Implementation has started. The repository is a pnpm/TypeScript workspace with the published plugin contract and `defineConfig`. `code-invariants check` loads config, parses TypeScript once (ts-morph), and runs enabled plugin rules. **No product rules ship yet** — with nothing configured it reports that honestly and exits 0.
+The engine (`code-invariants check`) loads config, parses TypeScript once (ts-morph), and runs enabled plugin rules. Core has **no built-in rule bag**. The first product plugin is [`@code-invariants/typescript`](packages/typescript) with `ts/public-exports-tested`. With nothing configured, check reports that honestly and exits 0.
 
-**Core architectural decisions are locked** in [docs/SPECS.md](docs/SPECS.md) (CLI shape, `defineConfig`, plugin contract, TypeScript-first core, no wrapping of Biome/ESLint, native AST per frontend, performance approach, etc.). An agent can treat those decisions as stable and start implementing against them.
+**Core architectural decisions are locked** in [docs/SPECS.md](docs/SPECS.md) (CLI shape, `defineConfig`, plugin contract, TypeScript-first core, no wrapping of Biome/ESLint, native AST per frontend, performance approach, etc.). TypeScript catalog: [docs/rulesets/typescript.md](docs/rulesets/typescript.md).
 
 The original author has a working internal TypeScript/TSX prototype for several of the compositional rules. The goal of this public repo is to generalise it, add the missing pieces (semantic DRY, Python, agent integration, test-presence gates), and make it a proper open-source project that coding agents can build upon.
 
@@ -78,14 +78,13 @@ pnpm test    # vitest
 pnpm check   # biome (lint + format)
 ```
 
-Layout: one package (`packages/code-invariants`) holding the core, the CLI, and the public
-plugin types. It splits into separate packages when a second consumer appears — most likely
-with the Python frontend.
+Layout: `packages/code-invariants` (engine, CLI, plugin contract) and
+`packages/typescript` (`@code-invariants/typescript`).
 
 ## Roadmap (High Level)
 
 1. **Phase 0** — Documentation & design ✅
-2. **Phase 1** — Core TypeScript engine (ts-morph based) + first set of compositional rules (useQuery error handling, DataRegion-style state exhaustiveness, semantic style tokens)
+2. **Phase 1** — Core TypeScript engine ✅. Product rules start via `@code-invariants/typescript` (`ts/public-exports-tested`). Compositional React rules (R1–R3) are a later plugin.
 3. **Phase 2** — CI integration, CLI, and basic MCP server so agents can query/check
 4. **Phase 3** — Semantic DRY layer (vector index + similarity gate)
 5. **Phase 4** — Python support (libCST / tree-sitter + equivalent rules)
@@ -98,12 +97,11 @@ This repository is intentionally structured so that a coding agent can pick it u
 
 Recommended first tasks for an agent:
 
-1. Read `docs/VISION.md`, `docs/SPECS.md`, and `docs/RESEARCH.md` thoroughly.
+1. Read `docs/VISION.md`, `docs/SPECS.md`, `docs/RESEARCH.md`, and `docs/rulesets/typescript.md`.
 2. Treat the **Locked decisions** section in `docs/SPECS.md` as binding.
-3. Scaffold a TypeScript package with the core engine based on `ts-morph`.
-4. Implement the first three example rules as plugins that obey the published contract.
-5. Add a simple CLI (`npx code-invariants check`) with `--diff` / `--plugin` / `--rule` support and a GitHub Action.
-6. Add tests for the rules themselves.
+3. Add a rule to `@code-invariants/typescript` (or a new plugin via the create-plugin skill). Do **not** re-scaffold the engine, and do **not** invent import-lint / cycle / path-ban rules (SPECS locked #7).
+4. Every rule needs valid + invalid fixtures and actionable messages.
+5. CLI `--plugin` / `--rule` / `--diff` and MCP are later work — do not invent a parallel engine.
 
 See `docs/SPECS.md` for precise interfaces and expected behaviour.
 
