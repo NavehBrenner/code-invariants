@@ -11,11 +11,11 @@ export function createTypeScriptFrontend(): LanguageFrontend {
   return {
     language: "typescript",
     parseFiles(absolutePaths) {
-      const units = new Map<string, SourceUnit>();
+      const sources = new Map<string, SourceUnit>();
       for (const path of absolutePaths) {
-        units.set(path, project.addSourceFileAtPath(path));
+        sources.set(path, project.addSourceFileAtPath(path));
       }
-      return units;
+      return { project, sources };
     },
   };
 }

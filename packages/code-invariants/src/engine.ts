@@ -3,7 +3,7 @@ import { basename, dirname, extname, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { CONFIG_FILENAMES, ConfigError, loadConfig } from "./config.ts";
 import { createFrontend } from "./frontend.ts";
-import type { Plugin, Rule, Severity, UserConfig, Violation } from "./index.ts";
+import type { Plugin, Rule, Severity, SourceUnit, UserConfig, Violation } from "./index.ts";
 
 const NOTHING_TO_CHECK = "No rules configured — nothing to check.";
 const DEFAULT_INCLUDE = ["**/*.ts", "**/*.tsx", "**/*.mts", "**/*.cts"];
@@ -50,27 +50,27 @@ async function runCheck(cwd: string, out: (msg: string) => void): Promise<number
     return 0;
   }
 
-  const units = frontend.parseFiles(files);
+  const parsed = frontend.parseFiles(files);
+  const displayPaths = files.map((abs) => displayPath(cwd, abs));
+  const lookup = createSourceLookup(parsed.sources, cwd);
   const violations: Violation[] = [];
-  for (const abs of files) {
-    const source = units.get(abs);
-    const filename = displayPath(cwd, abs);
-    for (const item of enabled) {
-      item.rule.create({
-        id: item.id,
-        options: undefined,
-        getSource: () => source,
-        getFilename: () => filename,
-        report(violation) {
-          violations.push({
-            ...violation,
-            ruleId: item.id,
-            severity: item.severity,
-            file: displayPath(cwd, violation.file),
-          });
-        },
-      });
-    }
+  for (const item of enabled) {
+    item.rule.create({
+      id: item.id,
+      options: undefined,
+      getProject: () => parsed.project,
+      getSources: () => parsed.sources,
+      getFilenames: () => displayPaths,
+      getSource: (name) => lookup(name),
+      report(violation) {
+        violations.push({
+          ...violation,
+          ruleId: item.id,
+          severity: item.severity,
+          file: displayPath(cwd, violation.file),
+        });
+      },
+    });
   }
 
   violations.sort(compareViolations);
@@ -178,6 +178,18 @@ function hasTsExtension(path: string): boolean {
 
 function isConfigFilename(path: string): boolean {
   return (CONFIG_FILENAMES as readonly string[]).includes(basename(path));
+}
+
+function createSourceLookup(
+  sources: ReadonlyMap<string, SourceUnit>,
+  cwd: string,
+): (name: string) => SourceUnit | undefined {
+  const aliases = new Map<string, SourceUnit>();
+  for (const [abs, unit] of sources) {
+    aliases.set(abs, unit);
+    aliases.set(displayPath(cwd, abs), unit);
+  }
+  return (name) => aliases.get(name) ?? aliases.get(resolve(cwd, name));
 }
 
 function displayPath(cwd: string, file: string): string {

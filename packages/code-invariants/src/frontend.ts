@@ -1,10 +1,7 @@
-import type { SourceUnit } from "./index.ts";
+import type { LanguageFrontend } from "./index.ts";
 import { createTypeScriptFrontend } from "./typescript-frontend.ts";
 
-export interface LanguageFrontend {
-  readonly language: string;
-  parseFiles(absolutePaths: readonly string[]): Map<string, SourceUnit>;
-}
+export type { LanguageFrontend, ParsedProject } from "./index.ts";
 
 export function createFrontend(language: string): LanguageFrontend | undefined {
   if (language === "typescript") {

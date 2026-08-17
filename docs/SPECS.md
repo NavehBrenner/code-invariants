@@ -37,7 +37,7 @@ These decisions are considered stable unless a major new constraint appears:
    `code-invariants` is the *higher-order* layer. It does **not** wrap, re-implement, or own configuration for Biome, ESLint, Prettier, Oxlint, or Ruff. Users are expected to run a fast linter/formatter of their choice. We may later offer a thin convenience flag that invokes the user’s existing Biome/ESLint config and then runs our rules, but we never own those tools’ configuration or rule sets. Custom plugins that need classic lint/format results should call those tools themselves.
 
 8. **AST strategy**  
-   No unified cross-language AST. Each frontend parses with its native tool **once per file**. The resulting native source unit is reused by every rule for that language. The plugin contract stays language-agnostic at the boundary (`RuleContext` + `report`) while giving rules full native AST power inside `create`. This avoids both the precision loss of a lowest-common-denominator IR and the cost of re-parsing for every rule.
+   No unified cross-language AST. Each frontend parses the language project **once per language run** and returns a `ParsedProject` (native `project` + `sources` map). The same project and source map are reused by every rule. Rules are **project-scoped**: `create` runs once per enabled rule (not once per file) and receives the whole graph via `RuleContext`. The plugin contract stays language-agnostic at the boundary (`RuleContext` + `report`) while giving rules full native AST power inside `create`. This avoids both the precision loss of a lowest-common-denominator IR and the cost of re-parsing for every rule.
 
 9. **Performance approach**  
    TypeScript core is the deliberate starting point for velocity and for a TypeScript-native plugin ecosystem. Performance is treated as a hard constraint:
@@ -110,13 +110,26 @@ export interface RuleContext {
   id: string;
   options: unknown;             // already validated against schema
   report(violation: Omit<Violation, "ruleId">): void;
-  getSource(): SourceUnit;      // language-specific, typed by the frontend
-  getFilename(): string;
-  // additional helpers as needed
+  getProject(): unknown;        // native project (ts-morph `Project` for TypeScript)
+  getSources(): ReadonlyMap<string, SourceUnit>; // same Map instance for every rule
+  getFilenames(): readonly string[];             // display paths, stable order
+  getSource(filename: string): SourceUnit | undefined; // display or absolute path
+}
+
+export interface LanguageFrontend {
+  readonly language: string;
+  /** Parse all paths once. Same project/sources object is reused for every rule. */
+  parseFiles(absolutePaths: readonly string[]): ParsedProject;
+}
+
+/** Opaque to core; TS frontend uses ts-morph Project + SourceFiles. */
+export interface ParsedProject {
+  readonly project: unknown;
+  readonly sources: ReadonlyMap<string, SourceUnit>;
 }
 ```
 
-Rules never touch the filesystem or the CLI. They only receive a `RuleContext` and call `context.report`. This keeps them testable and isolatable.
+Rules are project-scoped: `create` is invoked once per enabled rule per language run, not once per file. They never touch the filesystem or the CLI. They only receive a `RuleContext` and call `context.report`. This keeps them testable and isolatable.
 
 A custom plugin is simply an npm package (or local folder) that exports a `Plugin`. The core discovers it from the `plugins` array in the user’s config.
 

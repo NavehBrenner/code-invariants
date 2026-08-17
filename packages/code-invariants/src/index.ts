@@ -34,8 +34,14 @@ export interface RuleContext {
   /** Already validated against `meta.schema`. */
   options: unknown;
   report(violation: Omit<Violation, "ruleId">): void;
-  getSource(): SourceUnit;
-  getFilename(): string;
+  /** Native project (cast to ts-morph `Project` in TS rules). */
+  getProject(): unknown;
+  /** All parsed units for this run (same Map instance for every rule). */
+  getSources(): ReadonlyMap<string, SourceUnit>;
+  /** Display paths under check (stable order). */
+  getFilenames(): readonly string[];
+  /** Lookup one unit by display or absolute path; undefined if not in the run. */
+  getSource(filename: string): SourceUnit | undefined;
 }
 
 /** Returned by `create` when a rule wants per-node visiting instead of a one-shot pass. */
@@ -47,7 +53,11 @@ export interface Rule {
     schema?: JSONSchema;
     fixable?: "code" | "whitespace";
   };
-  /** `void`, not `undefined`: a `create` with no return statement must type-check. */
+  /**
+   * Project-scoped: invoked once per enabled rule per language run, not once
+   * per file. `void`, not `undefined`: a `create` with no return statement
+   * must type-check.
+   */
   create(context: RuleContext): void | RuleListener;
 }
 
@@ -66,6 +76,20 @@ export interface Plugin {
   configs?: {
     recommended?: Partial<UserConfig>;
   };
+}
+
+/** Opaque to core; TS frontend uses ts-morph Project + SourceFiles. */
+export interface ParsedProject {
+  /** Native project handle (ts-morph `Project` for TypeScript). */
+  readonly project: unknown;
+  /** absolute path → native source unit (ts-morph `SourceFile`). */
+  readonly sources: ReadonlyMap<string, SourceUnit>;
+}
+
+export interface LanguageFrontend {
+  readonly language: string;
+  /** Parse all paths once. Same project/sources object is reused for every rule. */
+  parseFiles(absolutePaths: readonly string[]): ParsedProject;
 }
 
 export { defineConfig } from "./config.ts";
