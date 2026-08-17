@@ -29,27 +29,89 @@ export type JSONSchema = Record<string, unknown>;
  */
 export type SourceUnit = unknown;
 
-export interface RuleContext {
+export type RuleKind = "language" | "project";
+
+export interface RuleDocs {
+  description: string;
+  url?: string;
+}
+
+export interface RuleMetaBase {
+  docs: RuleDocs;
+  schema?: JSONSchema;
+  fixable?: "code" | "whitespace";
+}
+
+export interface LanguageRuleMeta extends RuleMetaBase {
+  kind: "language";
+  /** Required, non-empty. Same product idea on two languages ⇒ two rules. */
+  languages: string[];
+}
+
+/**
+ * Workspace-level rule. `kind: "project"` is **not** a ts-morph `Project` —
+ * language rules use `getProject()` for that.
+ */
+export interface ProjectRuleMeta extends RuleMetaBase {
+  kind: "project";
+  /** Optional seam. `"index"` is not implemented yet. */
+  requires?: Array<"index">;
+}
+
+export interface LanguageRuleContext {
   id: string;
   /** Already validated against `meta.schema`. */
   options: unknown;
   report(violation: Omit<Violation, "ruleId">): void;
-  getSource(): SourceUnit;
-  getFilename(): string;
+  /** The pipeline language for this invocation. */
+  language: string;
+  /** Native project for **this** language only (ts-morph `Project` for TypeScript). */
+  getProject(): unknown;
+  /** All parsed units for this language run (same Map instance for every rule). */
+  getSources(): ReadonlyMap<string, SourceUnit>;
+  /** Display paths under check (stable order). */
+  getFilenames(): readonly string[];
+  /** Lookup one unit by display or absolute path; undefined if not in the run. */
+  getSource(filename: string): SourceUnit | undefined;
+}
+
+/**
+ * Workspace-level context. No language AST APIs (`getProject` / `getSources`).
+ * `kind: "project"` ≠ `getProject()`.
+ */
+export interface ProjectRuleContext {
+  id: string;
+  /** Already validated against `meta.schema`. */
+  options: unknown;
+  report(violation: Omit<Violation, "ruleId">): void;
+  getCwd(): string;
+  /** Workspace paths under include/exclude (display paths, stable order). */
+  getFiles(): readonly string[];
 }
 
 /** Returned by `create` when a rule wants per-node visiting instead of a one-shot pass. */
 export type RuleListener = Record<string, (node: unknown) => void>;
 
-export interface Rule {
-  meta: {
-    docs: { description: string; url?: string };
-    schema?: JSONSchema;
-    fixable?: "code" | "whitespace";
-  };
-  /** `void`, not `undefined`: a `create` with no return statement must type-check. */
-  create(context: RuleContext): void | RuleListener;
+export interface LanguageRule {
+  meta: LanguageRuleMeta;
+  /**
+   * Once per enabled rule per language. `void`, not `undefined`: a `create`
+   * with no return statement must type-check.
+   */
+  create(context: LanguageRuleContext): void | RuleListener;
 }
+
+export interface ProjectRule {
+  meta: ProjectRuleMeta;
+  /**
+   * Once per enabled workspace rule. `void`, not `undefined`: a `create`
+   * with no return statement must type-check.
+   */
+  create(context: ProjectRuleContext): void | RuleListener;
+}
+
+/** Discriminated on `meta.kind`. No default — missing/invalid kind is an error. */
+export type Rule = LanguageRule | ProjectRule;
 
 export interface UserConfig {
   languages: string[];
@@ -67,3 +129,19 @@ export interface Plugin {
     recommended?: Partial<UserConfig>;
   };
 }
+
+/** Opaque to core; TS frontend uses ts-morph Project + SourceFiles. */
+export interface ParsedProject {
+  /** Native project handle (ts-morph `Project` for TypeScript). */
+  readonly project: unknown;
+  /** absolute path → native source unit (ts-morph `SourceFile`). */
+  readonly sources: ReadonlyMap<string, SourceUnit>;
+}
+
+export interface LanguageFrontend {
+  readonly language: string;
+  /** Parse all paths once. Same project/sources object is reused for every rule. */
+  parseFiles(absolutePaths: readonly string[]): ParsedProject;
+}
+
+export { defineConfig } from "./config.ts";

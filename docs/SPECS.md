@@ -36,8 +36,14 @@ These decisions are considered stable unless a major new constraint appears:
 7. **Relationship to classic linters/formatters**  
    `code-invariants` is the *higher-order* layer. It does **not** wrap, re-implement, or own configuration for Biome, ESLint, Prettier, Oxlint, or Ruff. Users are expected to run a fast linter/formatter of their choice. We may later offer a thin convenience flag that invokes the user’s existing Biome/ESLint config and then runs our rules, but we never own those tools’ configuration or rule sets. Custom plugins that need classic lint/format results should call those tools themselves.
 
-8. **AST strategy**  
-   No unified cross-language AST. Each frontend parses with its native tool **once per file**. The resulting native source unit is reused by every rule for that language. The plugin contract stays language-agnostic at the boundary (`RuleContext` + `report`) while giving rules full native AST power inside `create`. This avoids both the precision loss of a lowest-common-denominator IR and the cost of re-parsing for every rule.
+8. **Two rule kinds / two pipelines**  
+   No unified cross-language AST. Same product idea on two languages ⇒ **two language rules**, not one multi-AST rule. Rules declare `meta.kind` with **no default** (`"language"` | `"project"`). Missing or invalid kind is a load/check error (exit 2).
+
+   **Language rules** (`kind: "language"`) must declare a non-empty `languages` array. Each frontend parses that language **once per language run** and returns a `ParsedProject` (native `project` + `sources` map). The same object is reused by every language rule for that language. `create` runs once per enabled language rule **per language** and receives `LanguageRuleContext` (`language`, `getProject`, `getSources`, `getSource(name)`, `getFilenames`). A language rule is never given another language’s parse, and must not set `requires`.
+
+   **Project rules** (`kind: "project"`) are **workspace-level**, not a ts-morph `Project`. They run in a **separate** pipeline with `ProjectRuleContext` (`getCwd`, `getFiles`). They never receive `getProject()` / source units / language AST APIs. Name clash: `kind: "project"` ≠ `getProject()`. Optional `requires?: Array<"index">` is a seam; if any enabled project rule requires `"index"`, check exits 2 (`index not implemented`) until a real index exists.
+
+   This avoids both the precision loss of a lowest-common-denominator IR and the cost of re-parsing for every rule, and keeps non-AST checks out of the language loop.
 
 9. **Performance approach**  
    TypeScript core is the deliberate starting point for velocity and for a TypeScript-native plugin ecosystem. Performance is treated as a hard constraint:
@@ -97,26 +103,65 @@ export interface Plugin {
   };
 }
 
-export interface Rule {
+export type Rule = LanguageRule | ProjectRule; // discriminated on meta.kind; no default
+
+export interface LanguageRule {
   meta: {
+    kind: "language";
+    languages: string[];        // required, non-empty; e.g. ["typescript"]
     docs: { description: string; url?: string };
-    schema?: JSONSchema;        // options validation
+    schema?: JSONSchema;
     fixable?: "code" | "whitespace";
   };
-  create(context: RuleContext): void | RuleListener;
+  create(context: LanguageRuleContext): void | RuleListener;
 }
 
-export interface RuleContext {
+export interface ProjectRule {
+  meta: {
+    kind: "project";            // workspace-level, **not** ts-morph Project
+    requires?: Array<"index">;  // optional seam; "index" not implemented yet
+    docs: { description: string; url?: string };
+    schema?: JSONSchema;
+    fixable?: "code" | "whitespace";
+  };
+  create(context: ProjectRuleContext): void | RuleListener;
+}
+
+export interface LanguageRuleContext {
   id: string;
   options: unknown;             // already validated against schema
   report(violation: Omit<Violation, "ruleId">): void;
-  getSource(): SourceUnit;      // language-specific, typed by the frontend
-  getFilename(): string;
-  // additional helpers as needed
+  language: string;             // pipeline language for this invocation
+  getProject(): unknown;        // native project for **that** language only
+  getSources(): ReadonlyMap<string, SourceUnit>;
+  getFilenames(): readonly string[];
+  getSource(filename: string): SourceUnit | undefined;
+}
+
+export interface ProjectRuleContext {
+  id: string;
+  options: unknown;
+  report(violation: Omit<Violation, "ruleId">): void;
+  getCwd(): string;
+  getFiles(): readonly string[]; // display paths, stable order; no AST APIs
+}
+
+export interface LanguageFrontend {
+  readonly language: string;
+  /** Parse all paths once. Same project/sources object is reused for every rule. */
+  parseFiles(absolutePaths: readonly string[]): ParsedProject;
+}
+
+/** Opaque to core; TS frontend uses ts-morph Project + SourceFiles. */
+export interface ParsedProject {
+  readonly project: unknown;
+  readonly sources: ReadonlyMap<string, SourceUnit>;
 }
 ```
 
-Rules never touch the filesystem or the CLI. They only receive a `RuleContext` and call `context.report`. This keeps them testable and isolatable.
+Language rules: `create` is invoked once per enabled rule **per language**, not once per file, and only for languages in both `meta.languages` and `config.languages`. Project rules (`kind: "project"` = workspace-level, **not** ts-morph `Project`) run in a separate pipeline and must not receive language AST context. Rules never touch the filesystem or the CLI; they only receive their context and call `context.report`. This keeps them testable and isolatable.
+
+Enabled language rule whose `languages` do not intersect `config.languages` is an error (do not silently skip). A language listed on an enabled rule with no frontend is an error. `requires` on a language rule is an error. Missing/invalid `kind` or empty `languages` on a language rule is an error.
 
 A custom plugin is simply an npm package (or local folder) that exports a `Plugin`. The core discovers it from the `plugins` array in the user’s config.
 
