@@ -11,9 +11,11 @@ import {
   type Rule,
   type Severity,
   type SourceUnit,
+  type StructuralIndex,
   type UserConfig,
   type Violation,
 } from "./index.ts";
+import { loadStructuralIndex } from "./structural-index.ts";
 
 const NOTHING_TO_CHECK = "No rules configured — nothing to check.";
 const DEFAULT_INCLUDE = ["**/*.ts", "**/*.tsx", "**/*.mts", "**/*.cts"];
@@ -125,12 +127,24 @@ async function runCheck(cwd: string, out: (msg: string) => void): Promise<number
 
   if (workspaceFiles !== undefined && workspaceFiles.length > 0) {
     const displayPaths = workspaceFiles.map((abs) => displayPath(cwd, abs));
+    const indexRules = projectRules.filter((item) => requiresIndex(item.rule));
+    const index =
+      indexRules.length > 0
+        ? await loadStructuralIndex({
+            cwd,
+            exclude: mergedExclude(config),
+            includeFiles: displayPaths,
+            requiredBy: indexRules.map((item) => item.id),
+          })
+        : undefined;
     for (const item of projectRules) {
+      const wantsIndex = requiresIndex(item.rule);
       item.rule.create({
         id: item.id,
         options: undefined,
         getCwd: () => cwd,
         getFiles: () => displayPaths,
+        getIndex: () => readIndex(item.id, wantsIndex, index),
         report(violation) {
           report(item, violation);
         },
@@ -288,9 +302,28 @@ function validateProjectMeta(id: string, meta: Record<string, unknown>): void {
       );
     }
   }
-  if (requires.includes("index")) {
-    throw new ConfigError(`Index not implemented (required by ${id}).`);
+}
+
+function requiresIndex(rule: ProjectRule): boolean {
+  return rule.meta.requires?.includes("index") === true;
+}
+
+function readIndex(
+  id: string,
+  wantsIndex: boolean,
+  index: StructuralIndex | undefined,
+): StructuralIndex {
+  if (!wantsIndex) {
+    throw new ConfigError(`getIndex() requires meta.requires: ["index"]`);
   }
+  if (index === undefined) {
+    throw new ConfigError(`Index not available (required by ${id}).`);
+  }
+  return index;
+}
+
+function mergedExclude(config: UserConfig): string[] {
+  return [...new Set([...(config.exclude ?? DEFAULT_EXCLUDE), ...DEFAULT_EXCLUDE])];
 }
 
 async function listLanguageFiles(cwd: string, config: UserConfig): Promise<string[]> {

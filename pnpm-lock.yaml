@@ -31,6 +31,16 @@ importers:
         specifier: ^26.2.0
         version: 26.2.0
 
+  packages/dry:
+    dependencies:
+      code-invariants:
+        specifier: workspace:*
+        version: link:../code-invariants
+    devDependencies:
+      '@types/node':
+        specifier: ^26.2.0
+        version: 26.2.0
+
   packages/react:
     dependencies:
       code-invariants:

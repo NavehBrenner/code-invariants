@@ -58,8 +58,33 @@ export interface LanguageRuleMeta extends RuleMetaBase {
  */
 export interface ProjectRuleMeta extends RuleMetaBase {
   kind: "project";
-  /** Optional seam. `"index"` is not implemented yet. */
+  /**
+   * Optional seam. `"index"` is a structural clone snapshot via dupehound
+   * (`getIndex()`), not embeddings.
+   */
   requires?: Array<"index">;
+}
+
+export interface StructuralCloneMember {
+  file: string;
+  name: string;
+  startLine: number;
+  endLine: number;
+  representative: boolean;
+  test: boolean;
+}
+
+export interface StructuralCloneCluster {
+  id: number;
+  similarity: number;
+  testOnly: boolean;
+  members: StructuralCloneMember[];
+}
+
+/** Ephemeral structural clone snapshot. Not a vector store. */
+export interface StructuralIndex {
+  kind: "structural";
+  clusters: readonly StructuralCloneCluster[];
 }
 
 export interface LanguageRuleContext {
@@ -91,6 +116,11 @@ export interface ProjectRuleContext {
   getCwd(): string;
   /** Workspace paths under include/exclude (display paths, stable order). */
   getFiles(): readonly string[];
+  /**
+   * Structural clone snapshot. Only rules with `meta.requires: ["index"]`
+   * may call this; others get an exit-2 error.
+   */
+  getIndex(): StructuralIndex;
 }
 
 /** Returned by `create` when a rule wants per-node visiting instead of a one-shot pass. */

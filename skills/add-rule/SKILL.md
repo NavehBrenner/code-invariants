@@ -20,9 +20,9 @@ Add **one** rule to an existing plugin, with fixtures and tests.
 2. Implement `Rule` with **no default `kind`**:
    - `meta.kind: "language"` **or** `"project"` (required)
    - Language: set `meta.languages` (non-empty, e.g. `["typescript"]`); `create` uses `LanguageRuleContext` (`getProject` / `getSources` / `getSource` / `getFilenames`). Same idea on two languages ⇒ two language rules.
-   - Project: workspace-level, **not** ts-morph `Project`. `create` uses only `ProjectRuleContext` (`getCwd` / `getFiles` / `report`). Do **not** call language AST APIs.
-   - `meta.docs.description` (and url if docs exist)
-   - No filesystem or CLI side channels
+    - Project: workspace-level, **not** ts-morph `Project`. `create` uses only `ProjectRuleContext` (`getCwd` / `getFiles` / `report`, and `getIndex()` only if `meta.requires: ["index"]`). Do **not** call language AST APIs or spawn CLIs.
+    - `meta.docs.description` (and url if docs exist)
+    - No filesystem or CLI side channels
 3. Add fixtures:
    - **valid** samples that must produce zero violations
    - **invalid** samples that must produce the expected `ruleId` and clear messages

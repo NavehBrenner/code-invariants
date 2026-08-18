@@ -26,7 +26,7 @@ These decisions are considered stable unless a major new constraint appears:
 4. **Plugins**  
    First-class and user-writable. There is one explicit contract (see § Plugin contract). Plugins can be published as npm packages or loaded from local paths. Agent skills for creating and maintaining plugins are part of the deliverable.  
    **v1 plugin language is TypeScript only.** Plugins are TypeScript/JavaScript packages that export the `Plugin` interface. Python-written plugins may be supported later via the same protocol once a Python frontend exists.  
-   **Core has no built-in rule bag.** Every check is a plugin rule. Core is the engine, language frontends, config/CLI, and (later) the index — not a default catalog. Baseline TypeScript rules live in `@code-invariants/typescript` (`Plugin.name: "ts"`). A plugin may ship `configs.recommended`; installing a plugin does **not** enable its rules (locked #2).
+    **Core has no built-in rule bag.** Every check is a plugin rule. Core is the engine, language frontends, config/CLI, and the structural index capability (dupehound wrap) — not a default catalog. Baseline TypeScript rules live in `@code-invariants/typescript` (`Plugin.name: "ts"`). React compositional rules live in `@code-invariants/react` (`Plugin.name: "react"`). Structural DRY lives in `@code-invariants/dry` (`Plugin.name: "dry"`). A plugin may ship `configs.recommended`; installing a plugin does **not** enable its rules (locked #2).
 
 5. **Runtime helpers**  
    Optional companion packages (e.g. a future official `DataRegion`). Static rules work both with the official helpers and with equivalent structural patterns the user already has. **Helpers are optional; this WP ships none.** TanStack Query detectors live under `@code-invariants/react`, not a separate package.
@@ -39,7 +39,9 @@ These decisions are considered stable unless a major new constraint appears:
 
     **TypeScript baseline — what we own:** `ts/public-exports-tested` (static R5-lite).
 
-    **React plugin — what we own:** `react/no-fetch-in-useeffect` and `react/query-error-handled` (R1-lite). TanStack stays inside `@code-invariants/react` (detectors only). **R3 semantic tokens → future `@code-invariants/tailwind` (or DS), not react.** Later: index-backed DRY (R4). Architecture fitness only if we add something ArchUnit / dependency-cruiser do not already cover.
+    **React plugin — what we own:** `react/no-fetch-in-useeffect` and `react/query-error-handled` (R1-lite). TanStack stays inside `@code-invariants/react` (detectors only). **R3 semantic tokens → future `@code-invariants/tailwind` (or DS), not react.**
+
+    **DRY plugin — what we own:** `dry/no-duplicate-functions` (structural R4 via dupehound). We wrap the dupehound CLI for agent-facing violations and plugin config; we do not re-own its fingerprinting algorithm. Embeddings / Slopo-style semantic near-dupes remain later. Architecture fitness only if we add something ArchUnit / dependency-cruiser do not already cover.
 
    **What we do not own** (use Biome, ESLint, or dependency-cruiser): circular imports; max relative import depth; simple path bans (`dist/`, `generated/`, …); deep-import / internal-module bans; generic layer charts those tools already do well.
 
@@ -50,7 +52,7 @@ These decisions are considered stable unless a major new constraint appears:
 
    **Language rules** (`kind: "language"`) must declare a non-empty `languages` array. Each frontend parses that language **once per language run** and returns a `ParsedProject` (native `project` + `sources` map). The same object is reused by every language rule for that language. `create` runs once per enabled language rule **per language** and receives `LanguageRuleContext` (`language`, `getProject`, `getSources`, `getSource(name)`, `getFilenames`). A language rule is never given another language’s parse, and must not set `requires`.
 
-   **Project rules** (`kind: "project"`) are **workspace-level**, not a ts-morph `Project`. They run in a **separate** pipeline with `ProjectRuleContext` (`getCwd`, `getFiles`). They never receive `getProject()` / source units / language AST APIs. Name clash: `kind: "project"` ≠ `getProject()`. Optional `requires?: Array<"index">` is a seam; if any enabled project rule requires `"index"`, check exits 2 (`index not implemented`) until a real index exists.
+    **Project rules** (`kind: "project"`) are **workspace-level**, not a ts-morph `Project`. They run in a **separate** pipeline with `ProjectRuleContext` (`getCwd`, `getFiles`, `getIndex` when required). They never receive `getProject()` / source units / language AST APIs. Name clash: `kind: "project"` ≠ `getProject()`. Optional `requires?: Array<"index">` is implemented as an ephemeral structural clone snapshot: when any enabled project rule requires `"index"`, the engine runs `dupehound scan --json` once and exposes `getIndex()`. Missing / unrunnable binary, timeout, or invalid JSON → exit 2 (fail closed). Not a vector store. `code-invariants index` CLI stays unimplemented.
 
    This avoids both the precision loss of a lowest-common-denominator IR and the cost of re-parsing for every rule, and keeps non-AST checks out of the language loop.
 
@@ -80,14 +82,14 @@ These decisions are considered stable unless a major new constraint appears:
 │  - collects violations with location + fix hints            │
 └──────────────┬──────────────────────────────┬───────────────┘
                │                              │
-     ┌─────────▼─────────┐          ┌─────────▼─────────┐
-     │  Language Frontends│          │  Semantic Index   │
-     │  - TypeScript      │          │  (vector store)   │
-     │    (ts-morph)      │          │  for DRY checks   │
-     │  - Python (later)  │          └───────────────────┘
-     │    (libCST /       │
-     │     tree-sitter)   │
-     └────────────────────┘
+      ┌─────────▼─────────┐          ┌─────────▼─────────┐
+      │  Language Frontends│          │  Structural Index │
+      │  - TypeScript      │          │  (dupehound scan) │
+      │    (ts-morph)      │          │  Vector store     │
+      │  - Python (later)  │          │  remains later    │
+      │    (libCST /       │          └───────────────────┘
+      │     tree-sitter)   │
+      └────────────────────┘
 ```
 
 ### Core concepts
@@ -98,10 +100,10 @@ These decisions are considered stable unless a major new constraint appears:
 
   `NO_SUGGESTION = "No suggestion available for this rule."`
 
-  Product rules in this repo (`ts/public-exports-tested`, `react/no-fetch-in-useeffect`, `react/query-error-handled`) **must** use concrete suggestions, not the sentinel. CLI prints a `suggestion:` line unless the value is exactly `NO_SUGGESTION`. `report()` fills the sentinel at runtime if the field is missing (JS plugins keep working).
+  Product rules in this repo (`ts/public-exports-tested`, `react/no-fetch-in-useeffect`, `react/query-error-handled`, `dry/no-duplicate-functions`) **must** use concrete suggestions, not the sentinel. CLI prints a `suggestion:` line unless the value is exactly `NO_SUGGESTION`. `report()` fills the sentinel at runtime if the field is missing (JS plugins keep working).
 - **Frontend**: Language-specific AST / symbol provider that implements the frontend protocol.
 - **Plugin**: A package that exports one or more rules (and optionally recommended configs) conforming to the plugin contract.
-- **Index**: Optional persistent vector + structural index of the repository.
+- **Index**: Structural clone snapshot via dupehound when an enabled project rule `requires: ["index"]`. Vector / embedding index is still future.
 
 ## 2. Plugin contract (explicit)
 
@@ -133,7 +135,7 @@ export interface LanguageRule {
 export interface ProjectRule {
   meta: {
     kind: "project";            // workspace-level, **not** ts-morph Project
-    requires?: Array<"index">;  // optional seam; "index" not implemented yet
+    requires?: Array<"index">;  // structural clone snapshot via dupehound
     docs: { description: string; url?: string };
     schema?: JSONSchema;
     fixable?: "code" | "whitespace";
@@ -152,12 +154,34 @@ export interface LanguageRuleContext {
   getSource(filename: string): SourceUnit | undefined;
 }
 
+export interface StructuralCloneMember {
+  file: string;
+  name: string;
+  startLine: number;
+  endLine: number;
+  representative: boolean;
+  test: boolean;
+}
+
+export interface StructuralCloneCluster {
+  id: number;
+  similarity: number;
+  testOnly: boolean;
+  members: StructuralCloneMember[];
+}
+
+export interface StructuralIndex {
+  kind: "structural";
+  clusters: readonly StructuralCloneCluster[];
+}
+
 export interface ProjectRuleContext {
   id: string;
   options: unknown;
   report(violation: Omit<Violation, "ruleId">): void;
   getCwd(): string;
   getFiles(): readonly string[]; // display paths, stable order; no AST APIs
+  getIndex(): StructuralIndex;   // only if meta.requires includes "index"
 }
 
 export interface LanguageFrontend {
@@ -231,7 +255,30 @@ Implemented in `@code-invariants/react`.
 
 **Not the React plugin.** Future `@code-invariants/tailwind` (or DS). Do not add token/class allowlists to `@code-invariants/react`.
 
-### R4 — Semantic DRY gate (proactive + CI)
+### R4 — Structural DRY (`dry/no-duplicate-functions`)
+
+Implemented in `@code-invariants/dry` as **`dry/no-duplicate-functions`**.  
+`kind: "project"`, `requires: ["index"]`. Uses only `ProjectRuleContext` (`getCwd`, `getFiles`, `getIndex`, `report`). We wrap [dupehound](https://github.com/Rafaelpta/dupehound) `scan --json`; we do not reimplement fingerprints.
+
+**Intent:** No structurally duplicate functions/methods in included non-test, non-generated sources.
+
+| Topic | Decision |
+|--------|----------|
+| Engine | dupehound structural fingerprints (tree-sitter + winnowing). Engine invokes the CLI once per check when any enabled project rule `requires: ["index"]` and exposes `getIndex()`. |
+| Out | Embeddings, Slopo, `query --similar`, auto-merge / codemods. Incremental `dupehound check --diff` is later (`--diff` / WP-015). |
+| Unit | All function-likes dupehound extracts (top-level, methods, arrow/`const` function-likes, `<anonymous>`). |
+| Skip | Tests (`--exclude-tests` + path rules), generated (dupehound defaults + our exclude), files outside include (post-filter). |
+| Threshold | dupehound scan default (0.80). Not configurable in v1. |
+| `min_tokens` | 40 (dupehound default). Short functions are a known miss. |
+| Violation | Copy (non-representative) location; message names both functions and similarity; concrete reuse suggestion pointing at the original. Never `NO_SUGGESTION`. Range is best-effort (lines only, column 1). |
+| Severity | `"error"` in recommended; config may set `"warn"`. No extra soft-gate product mode. |
+| Capability | `requires: ["index"]`. Fail closed (exit 2, clear message) if dupehound is missing, unrunnable, times out, or returns invalid JSON. Empty clusters after test/generated skip is success, not an error. |
+| Install | Binary on `PATH` or `CODE_INVARIANTS_DUPEHOUND`. Pin **v0.1.2**. No network in default `check`. Optional `scripts/install-dupehound.sh` for local/CI. |
+
+**Recommended:** `configs.recommended.rules["dry/no-duplicate-functions"] = "error"`. Install does **not** apply recommended (locked #2 / #4).
+
+See [docs/rulesets/dry.md](./rulesets/dry.md).
+
 ### R5 — Test presence (static)
 
 Implemented in `@code-invariants/typescript` as **`ts/public-exports-tested`**.  
@@ -254,7 +301,7 @@ See [docs/rulesets/typescript.md](./rulesets/typescript.md).
 
 ### R6 — Architecture fitness (stretch)
 
-(Details of R4 and R6 remain as previously specified.)
+(Details of R6 remain as previously specified.)
 
 ### v1 TypeScript plugin catalog
 
@@ -283,6 +330,16 @@ Backlog (effects family, query-pending, component API, Next/RSC, tailwind/R3) is
 
 Do **not** own classic eslint-plugin-react / react-hooks / jsx-a11y, TanStack eslint mechanical rules, or `@next/no-async-client-component`.
 
+### v1 DRY plugin catalog
+
+`@code-invariants/dry` (`name: "dry"`) ships only:
+
+| Rule | Status |
+|------|--------|
+| `dry/no-duplicate-functions` | Implemented (this section; structural R4) |
+
+Embeddings / semantic near-dupes are **not** this plugin.
+
 ## 4. CLI interface
 
 ```bash
@@ -307,12 +364,14 @@ export default defineConfig({
   plugins: [
     "@code-invariants/typescript",
     "@code-invariants/react",
+    // "@code-invariants/dry",
     "./my-custom-plugin",
   ],
   rules: {
     "ts/public-exports-tested": "error",
     "react/no-fetch-in-useeffect": "error",
     "react/query-error-handled": "error",
+    // "dry/no-duplicate-functions": "error",
   },
   include: ["src/**/*.{ts,tsx}"],
   exclude: ["**/generated/**"],
