@@ -34,7 +34,7 @@ When filing an issue (human or agent):
 
 - Title: imperative, specific (`feat(typescript): add public-exports-tested rule`).
 - Do not invent import-lint / cycle / path-ban rules or re-scaffold the engine. Add rules to an existing plugin (or create a new plugin) per SPECS locked #7.
-- Body: what changed, why, how to verify (commands/fixtures).
+- Body: `Closes #<issue>`, then what changed, why, how to verify (commands/fixtures). See [AGENTS.md](../AGENTS.md#working-through-github-oc).
 - Do not mix unrelated refactors with rule additions.
 - Update SPECS or ruleset docs when behavior or public contract changes.
 

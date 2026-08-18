@@ -31,6 +31,18 @@ Do **not** invent import-lint / cycle / path-ban rules or a long TypeScript cata
 
 Code style and TypeScript hygiene will be enforced by the tool itself as it matures. Do not expand agent docs with lint rule lists.
 
+## Working through GitHub (`/oc`)
+
+**Plan before you build. Always.**
+
+- Opening an issue auto-runs you in `plan` mode. So does any `/oc …` comment,
+  inline or on the conversation, and any review whose summary says `/oc …`.
+- In `plan` mode: post the plan as a comment on the issue and **stop**. No branch, no commits, no PR — not even a small one, not even if the issue looks trivial or already spells out the solution.
+- Implement only when a comment says `/oc build`. That is the approval; prose asking you to "go ahead" in a plan run is not.
+- A plan states: files touched, the SPECS sections it honours, what gets tested, and what is deliberately out of scope.
+
+PR body: `Closes #<github-issue>`, then what changed, why, and how to verify. The closing reference is load-bearing — CI reads it to attach the PR to Linear and to request review. Nothing else about Linear or reviewers is your job.
+
 ## Workflow skills
 
 | Skill | Use when |
