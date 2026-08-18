@@ -33,7 +33,8 @@ See SPECS §3 R1. Summary:
 - **Import:** `@tanstack/react-query` (or `/` subpath).
 - **In:** `useQuery`, `useInfiniteQuery` (aliases + namespace).
 - **Skip:** `useSuspenseQuery`, `useSuspenseInfiniteQuery` (boundary / throw).
-- **Compliance:** same-function `isError` / `error` / `status === "error"` in `if` / ternary / `&&`, **or** `throwOnError: true` / function form on the v5 first or v4 second options object. Destructure without a branch is not enough. Unresolved `throwOnError` identifier is not compliance.
+- **Compliance:** call-local binding/alias tracking in the enclosing function: `if` / ternary / `&&` on **that call’s** `isError` / `error` / `status === "error"` (destructure, rename, `q.*`, or simple local alias), **or** `throwOnError: true` / function form on the v5 first or v4 second options object. Destructure without a branch is not enough. Unrelated / other-call `isError`/`error`/`status` names are not compliance. Unresolved `throwOnError` identifier is not compliance.
+- **Known miss:** checks only inside other functions / helpers / prop-drilled values / Error Boundaries.
 - **Out:** pending UI, parent Error Boundary graph, SWR/Apollo, mandatory DataRegion.
 - **Violation:** range on the hook call; message says the error is unhandled; concrete suggestion (local error UI or `throwOnError` + boundary).
 

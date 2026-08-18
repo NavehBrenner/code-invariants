@@ -224,3 +224,119 @@ export function Comp() {
 `);
   expect(result.code).toBe(1);
 });
+
+test("unrelated isError in condition is invalid", async () => {
+  const result = await runSource(`import { useQuery } from "@tanstack/react-query";
+export function Comp() {
+  const isError = true;
+  const q = useQuery({ queryKey: ["x"], queryFn: () => 1 });
+  if (isError) {
+    return null;
+  }
+  return q.data;
+}
+`);
+  expect(result.code).toBe(1);
+  expect(result.out).toMatch(/useQuery error is unhandled/);
+});
+
+test("unrelated error in condition is invalid", async () => {
+  const result = await runSource(`import { useQuery } from "@tanstack/react-query";
+export function Comp() {
+  const error = new Error("nope");
+  const q = useQuery({ queryKey: ["x"], queryFn: () => 1 });
+  if (error) {
+    return null;
+  }
+  return q.data;
+}
+`);
+  expect(result.code).toBe(1);
+  expect(result.out).toMatch(/useQuery error is unhandled/);
+});
+
+test("two queries only one handled is invalid", async () => {
+  const result = await runSource(`import { useQuery } from "@tanstack/react-query";
+export function Comp() {
+  const a = useQuery({ queryKey: ["a"], queryFn: () => 1 });
+  const b = useQuery({ queryKey: ["b"], queryFn: () => 2 });
+  if (a.isError) {
+    return null;
+  }
+  return b.data;
+}
+`);
+  expect(result.code).toBe(1);
+  expect(result.out.match(/useQuery error is unhandled/g)?.length).toBe(1);
+});
+
+test("destructure isError rename is valid", async () => {
+  const result = await runSource(`import { useQuery } from "@tanstack/react-query";
+export function Comp() {
+  const { data, isError: failed } = useQuery({ queryKey: ["x"], queryFn: () => 1 });
+  if (failed) {
+    return null;
+  }
+  return data;
+}
+`);
+  expect(result.code).toBe(0);
+});
+
+test("q.isError branch is valid", async () => {
+  const result = await runSource(`import { useQuery } from "@tanstack/react-query";
+export function Comp() {
+  const q = useQuery({ queryKey: ["x"], queryFn: () => 1 });
+  if (q.isError) {
+    return null;
+  }
+  return q.data;
+}
+`);
+  expect(result.code).toBe(0);
+});
+
+test("local isError alias is valid", async () => {
+  const result = await runSource(`import { useQuery } from "@tanstack/react-query";
+export function Comp() {
+  const q = useQuery({ queryKey: ["x"], queryFn: () => 1 });
+  const failed = q.isError;
+  if (failed) {
+    return null;
+  }
+  return q.data;
+}
+`);
+  expect(result.code).toBe(0);
+});
+
+test("local status alias is valid", async () => {
+  const result = await runSource(`import { useQuery } from "@tanstack/react-query";
+export function Comp() {
+  const q = useQuery({ queryKey: ["x"], queryFn: () => 1 });
+  const s = q.status;
+  if (s === "error") {
+    return null;
+  }
+  return q.data;
+}
+`);
+  expect(result.code).toBe(0);
+});
+
+test("nested function isError check is not compliance", async () => {
+  const result = await runSource(`import { useQuery } from "@tanstack/react-query";
+export function Comp() {
+  const q = useQuery({ queryKey: ["x"], queryFn: () => 1 });
+  function inner() {
+    if (q.isError) {
+      return null;
+    }
+  }
+  void inner;
+  return q.data;
+}
+`);
+  expect(result.code).toBe(1);
+  expect(result.out).toMatch(/useQuery error is unhandled/);
+});
