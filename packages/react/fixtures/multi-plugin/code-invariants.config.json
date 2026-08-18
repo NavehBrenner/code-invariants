@@ -1,0 +1,9 @@
+{
+  "languages": ["typescript"],
+  "plugins": ["../../../typescript/dist/index.js", "../../dist/index.js"],
+  "rules": {
+    "ts/public-exports-tested": "error",
+    "react/no-fetch-in-useeffect": "error",
+    "react/query-error-handled": "error"
+  }
+}

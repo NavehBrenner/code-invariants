@@ -36,4 +36,4 @@ Use Biome, ESLint, or dependency-cruiser:
 
 ## Other first-class SPECS rules
 
-R1–R6 stay [SPECS](../SPECS.md) §3 pointers. React / compositional rules (R1/R2) are **not** TypeScript-baseline; they belong in a later `@code-invariants/react` (or similar). R3 semantic tokens, R4 index-backed DRY, and stretch architecture fitness are not this plugin.
+R1–R6 stay [SPECS](../SPECS.md) §3 pointers. React / compositional rules live in [`@code-invariants/react`](./react.md), not this plugin. R3 semantic tokens belong in a future `@code-invariants/tailwind` (or DS) plugin, not TypeScript or React. R4 index-backed DRY and stretch architecture fitness are not this plugin.
