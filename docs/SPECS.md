@@ -29,7 +29,7 @@ These decisions are considered stable unless a major new constraint appears:
    **Core has no built-in rule bag.** Every check is a plugin rule. Core is the engine, language frontends, config/CLI, and (later) the index — not a default catalog. Baseline TypeScript rules live in `@code-invariants/typescript` (`Plugin.name: "ts"`). A plugin may ship `configs.recommended`; installing a plugin does **not** enable its rules (locked #2).
 
 5. **Runtime helpers**  
-   Optional companion packages (e.g. `@code-invariants/react` shipping a reference `DataRegion`). Static rules work both with the official helpers and with equivalent structural patterns the user already has.
+   Optional companion packages (e.g. a future official `DataRegion`). Static rules work both with the official helpers and with equivalent structural patterns the user already has. **Helpers are optional; this WP ships none.** TanStack Query detectors live under `@code-invariants/react`, not a separate package.
 
 6. **Scope of v1**  
    High-quality TypeScript/React engine first. Python (and other languages) later, reusing the same core protocol.
@@ -37,7 +37,9 @@ These decisions are considered stable unless a major new constraint appears:
 7. **Relationship to classic linters/formatters**  
    `code-invariants` is the *higher-order* layer. It does **not** wrap, re-implement, or own configuration for Biome, ESLint, Prettier, Oxlint, or Ruff. Users are expected to run a fast linter/formatter of their choice. We may later offer a thin convenience flag that invokes the user’s existing Biome/ESLint config and then runs our rules, but we never own those tools’ configuration or rule sets. Custom plugins that need classic lint/format results should call those tools themselves.
 
-   **TypeScript baseline — what we own:** `ts/public-exports-tested` (static R5-lite). Later plugins may add compositional React (R1/R2), semantic tokens (R3), and index-backed DRY (R4). Architecture fitness only if we add something ArchUnit / dependency-cruiser do not already cover.
+    **TypeScript baseline — what we own:** `ts/public-exports-tested` (static R5-lite).
+
+    **React plugin — what we own:** `react/no-fetch-in-useeffect` and `react/query-error-handled` (R1-lite). TanStack stays inside `@code-invariants/react` (detectors only). **R3 semantic tokens → future `@code-invariants/tailwind` (or DS), not react.** Later: index-backed DRY (R4). Architecture fitness only if we add something ArchUnit / dependency-cruiser do not already cover.
 
    **What we do not own** (use Biome, ESLint, or dependency-cruiser): circular imports; max relative import depth; simple path bans (`dist/`, `generated/`, …); deep-import / internal-module bans; generic layer charts those tools already do well.
 
@@ -91,7 +93,12 @@ These decisions are considered stable unless a major new constraint appears:
 ### Core concepts
 
 - **Rule**: A named, configurable check that produces zero or more `Violation`s.
-- **Violation**: `{ ruleId, severity, file, range, message, suggestion? }`
+- **Violation**: `{ ruleId, severity, file, range, message, suggestion }`  
+  `suggestion` is **required**. When a rule has nothing to suggest, pass the sentinel exported from core:
+
+  `NO_SUGGESTION = "No suggestion available for this rule."`
+
+  Product rules in this repo (`ts/public-exports-tested`, `react/no-fetch-in-useeffect`, `react/query-error-handled`) **must** use concrete suggestions, not the sentinel. CLI prints a `suggestion:` line unless the value is exactly `NO_SUGGESTION`. `report()` fills the sentinel at runtime if the field is missing (JS plugins keep working).
 - **Frontend**: Language-specific AST / symbol provider that implements the frontend protocol.
 - **Plugin**: A package that exports one or more rules (and optionally recommended configs) conforming to the plugin contract.
 - **Index**: Optional persistent vector + structural index of the repository.
@@ -176,9 +183,54 @@ A custom plugin is simply an npm package (or local folder) that exports a `Plugi
 
 ## 3. First-class rules (v1 targets)
 
-### R1 — Query error handling (TypeScript / React)
+### R1 — Query error handling (`react/query-error-handled`)
+
+Implemented in `@code-invariants/react` as **`react/query-error-handled`**.  
+`kind: "language"`, `languages: ["typescript"]`. Structural only — no mandatory DataRegion / helper.
+
+**Intent:** Every TanStack `useQuery` (and locked twins) usage must not ignore errors.
+
+| Topic | Decision |
+|--------|----------|
+| Import | Specifier `=== "@tanstack/react-query"` or starts with `@tanstack/react-query/`. |
+| In | `useQuery`, `useInfiniteQuery` (same error model). Named aliases and `TQ.useQuery` / default-or-namespace member access. |
+| Skip | `useSuspenseQuery`, `useSuspenseInfiniteQuery` — do **not** require `isError` (error often via boundary / throw). |
+| Out | `useQueries`, `useMutation`, SWR, Apollo, parent Error Boundary graph proof, pending/loading UI, DataRegion / `matchQuery`. |
+| Compliance (any one) | (1) Same **enclosing function body** branches (`if` / ternary / `&&`) on a **fact derived from that call’s result**: tracked `isError` / `error` / `status` via the result binding (`q.isError`, `q.status`, `q.error`), destructure (including renames such as `{ isError: failed }`), or a simple same-function alias / reassign (`const failed = q.isError`, `const s = q.status`). `status` must be compared with `===` / `==` to `"error"` / `'error'`. Free / unrelated identifiers named `isError` / `error` / `status`, or another call’s flags, do **not** count. Mere destructure without a branch is **not** enough. Nested function declarations / non-IIFE callbacks are **not** that body. (2) Options object (v5 first arg or v4 second) has `throwOnError: true` or a function (not literally `false`). (3) No other escapes. |
+| Unfollowed | `throwOnError` as an identifier / shorthand we cannot see statically → **not** compliance. |
+| Known miss | Interprocedural / helper / prop-drilled / Error Boundary graph — only the enclosing function body is scanned. |
+| Config | none. |
+| Violation | Range on the hook call; `ruleId` `react/query-error-handled`; message names the hook and says the error is unhandled; concrete suggestion to branch locally **or** set `throwOnError: true` and render an Error Boundary. |
+
+**Recommended:** `configs.recommended.rules["react/query-error-handled"] = "error"`. Install does **not** apply recommended (locked #2 / #4).
+
+### `react/no-fetch-in-useeffect`
+
+Implemented in `@code-invariants/react`.  
+`kind: "language"`, `languages: ["typescript"]`. Aligns with React’s [You Might Not Need an Effect](https://react.dev/learn/you-might-not-need-an-effect).
+
+**Intent:** Do not kick off HTTP data loading inside `useEffect` / `useLayoutEffect`. Prefer data libraries, route loaders, or RSC.
+
+| Topic | Decision |
+|--------|----------|
+| Effect callees | `useEffect`, `useLayoutEffect` whose binding resolves to `react` (named, `import React`, `import * as React`; specifier `=== "react"` or starts with `react/`). Unresolved / local same-name functions: **not** flagged. |
+| Callback shape | First arg is inline `function` / arrow. Identifier callbacks: **known miss**, not followed in v1. |
+| Nested policy | Scan the callback body, blocks (`if` / `try` / `for`), and **IIFEs**. **Do not** scan nested function declarations / non-IIFE arrows (event handlers / helpers). |
+| Forbidden | `fetch(...)` (global or imported; a module-level local `function`/`const` named `fetch` is not the global). Callees bound to default/named/namespace import from specifier `axios` / `ky` / `got` (exact, or those names as path prefix `axios/…`). Cheap methods: `.get` / `.post` / `.put` / `.patch` / `.delete` on those same bindings (`axios.get`, `client.post`). |
+| Not forbidden | DOM, subscriptions, analytics, `setTimeout`, non-listed HTTP libs. |
+| Config | none. Future allowlist is a SPECS note only — not shipped. |
+| Violation | Range on the **forbidden call**; `ruleId` `react/no-fetch-in-useeffect`; message names the API (`fetch` / `axios.get` / …); concrete suggestion to load with TanStack Query / SWR / a route loader / RSC. |
+
+**Recommended:** `configs.recommended.rules["react/no-fetch-in-useeffect"] = "error"`.
+
 ### R2 — Exhaustive data states via compositional components (DataRegion pattern)
+
+**Deferred.** No mandatory DataRegion / `matchQuery` helper in this WP. Backlog (`react/query-pending-handled`, optional later DataRegion path) lives in [docs/rulesets/react.md](./rulesets/react.md) — research inventory, not implement-now.
+
 ### R3 — Semantic style tokens only
+
+**Not the React plugin.** Future `@code-invariants/tailwind` (or DS). Do not add token/class allowlists to `@code-invariants/react`.
+
 ### R4 — Semantic DRY gate (proactive + CI)
 ### R5 — Test presence (static)
 
@@ -202,7 +254,7 @@ See [docs/rulesets/typescript.md](./rulesets/typescript.md).
 
 ### R6 — Architecture fitness (stretch)
 
-(Details of R1–R4 and R6 remain as previously specified.)
+(Details of R4 and R6 remain as previously specified.)
 
 ### v1 TypeScript plugin catalog
 
@@ -216,7 +268,20 @@ See [docs/rulesets/typescript.md](./rulesets/typescript.md).
 
 **Overlap family:** `import-boundary` / layers / no-import-from / no-deep-import / max-relative-depth — catalog **none**.
 
-React / compositional R1–R3 are **not** TypeScript-baseline; they belong in a later `@code-invariants/react` (or similar).
+React compositional rules live in `@code-invariants/react`, not this plugin. See the React catalog below and [docs/rulesets/react.md](./rulesets/react.md).
+
+### v1 React plugin catalog
+
+`@code-invariants/react` (`name: "react"`) ships only:
+
+| Rule | Status |
+|------|--------|
+| `react/no-fetch-in-useeffect` | Implemented (this section) |
+| `react/query-error-handled` | Implemented (this section; R1-lite) |
+
+Backlog (effects family, query-pending, component API, Next/RSC, tailwind/R3) is documented in [docs/rulesets/react.md](./rulesets/react.md) and is **not** an implementation list for this WP.
+
+Do **not** own classic eslint-plugin-react / react-hooks / jsx-a11y, TanStack eslint mechanical rules, or `@next/no-async-client-component`.
 
 ## 4. CLI interface
 
@@ -241,10 +306,13 @@ export default defineConfig({
   languages: ["typescript"],
   plugins: [
     "@code-invariants/typescript",
+    "@code-invariants/react",
     "./my-custom-plugin",
   ],
   rules: {
     "ts/public-exports-tested": "error",
+    "react/no-fetch-in-useeffect": "error",
+    "react/query-error-handled": "error",
   },
   include: ["src/**/*.{ts,tsx}"],
   exclude: ["**/generated/**"],

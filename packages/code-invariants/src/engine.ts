@@ -3,15 +3,16 @@ import { basename, dirname, extname, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { CONFIG_FILENAMES, ConfigError, loadConfig } from "./config.ts";
 import { createFrontend, hasFrontend } from "./frontend.ts";
-import type {
-  LanguageRule,
-  Plugin,
-  ProjectRule,
-  Rule,
-  Severity,
-  SourceUnit,
-  UserConfig,
-  Violation,
+import {
+  type LanguageRule,
+  NO_SUGGESTION,
+  type Plugin,
+  type ProjectRule,
+  type Rule,
+  type Severity,
+  type SourceUnit,
+  type UserConfig,
+  type Violation,
 } from "./index.ts";
 
 const NOTHING_TO_CHECK = "No rules configured — nothing to check.";
@@ -90,6 +91,7 @@ async function runCheck(cwd: string, out: (msg: string) => void): Promise<number
       ruleId: item.id,
       severity: item.severity,
       file: displayPath(cwd, violation.file),
+      suggestion: violation.suggestion ?? NO_SUGGESTION,
     });
   };
 
@@ -346,7 +348,7 @@ function displayPath(cwd: string, file: string): string {
 
 function formatViolation(v: Violation): string {
   const loc = `${v.file}:${v.range.start.line}:${v.range.start.column}`;
-  const extra = v.suggestion === undefined ? "" : `\n  suggestion: ${v.suggestion}`;
+  const extra = v.suggestion === NO_SUGGESTION ? "" : `\n  suggestion: ${v.suggestion}`;
   return `${loc}  ${v.severity}  ${v.ruleId}  ${v.message}${extra}`;
 }
 

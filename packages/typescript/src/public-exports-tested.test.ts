@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "vitest";
 import { check } from "../../code-invariants/src/engine.ts";
+import { NO_SUGGESTION } from "../../code-invariants/src/index.ts";
 import plugin from "./index.ts";
 
 const silent = () => {};
@@ -62,6 +63,7 @@ test("named export with no test reference exits 1", async () => {
     /src\/foo\.ts:1:\d+\s+error\s+ts\/public-exports-tested\s+Public export "foo" in src\/foo\.ts is not referenced from a test file/,
   );
   expect(result.out).toMatch(/Import "foo" from a test path/);
+  expect(result.out).not.toMatch(NO_SUGGESTION);
 });
 
 test("default export used from a test file exits 0", async () => {

@@ -24,7 +24,7 @@ Scaffold a **new** plugin package (e.g. `@code-invariants/typescript`, `@code-in
 2. Create package skeleton:
    - `package.json` with name `@code-invariants/<name>` or local name
    - Entry that **exports a `Plugin` object** (`name`, `rules`, optional `configs.recommended`)
-3. Export a `Plugin` (`name`, `rules`, optional `configs.recommended`). Installing a plugin must **not** force all rules on. Do not pad the `rules` map with empty stub rules — only real rules. Baseline TypeScript already lives in `packages/typescript` (`@code-invariants/typescript`, `name: "ts"`); do not re-scaffold that plugin or the engine.
+3. Export a `Plugin` (`name`, `rules`, optional `configs.recommended`). Installing a plugin must **not** force all rules on. Do not pad the `rules` map with empty stub rules — only real rules. Product plugins already live in `packages/typescript` (`@code-invariants/typescript`, `name: "ts"`) and `packages/react` (`@code-invariants/react`, `name: "react"`); do not re-scaffold those plugins or the engine.
 4. Each requested rule needs required `meta.kind` (`"language"` or `"project"`), `meta.docs`, and a real `create` (or defer the rule to [add-rule](../add-rule/SKILL.md)). Language rules must set `meta.languages` (non-empty). Project rules must not use `getProject` / source APIs (`kind: "project"` is workspace-level, not ts-morph `Project`).
 5. Wire package into the monorepo (or document local path load via `defineConfig` `plugins` array).
 6. Add a smoke test: load plugin, assert `name` and rule ids exist.

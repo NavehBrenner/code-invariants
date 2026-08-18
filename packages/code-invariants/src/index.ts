@@ -5,6 +5,9 @@
 
 export type Severity = "error" | "warn" | "off";
 
+/** Exact string locked in docs/SPECS.md §1. Use only when a rule has nothing to suggest. */
+export const NO_SUGGESTION = "No suggestion available for this rule.";
+
 export interface Range {
   start: { line: number; column: number };
   end: { line: number; column: number };
@@ -16,7 +19,8 @@ export interface Violation {
   file: string;
   range: Range;
   message: string;
-  suggestion?: string;
+  /** Required. Product rules must use concrete text, not `NO_SUGGESTION`. */
+  suggestion: string;
 }
 
 /** ponytail: options schemas are validated at runtime, not type-checked here. */

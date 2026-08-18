@@ -16,7 +16,7 @@ Add **one** rule to an existing plugin, with fixtures and tests.
 
 ## Steps
 
-1. Confirm the rule belongs in this plugin (language baseline vs framework vs architecture). Do **not** add import-boundary / layers / no-deep-import / cycle / path-ban rules to `@code-invariants/typescript` (SPECS locked #7).
+1. Confirm the rule belongs in this plugin (language baseline vs framework vs architecture). Do **not** add import-boundary / layers / no-deep-import / cycle / path-ban rules to `@code-invariants/typescript` (SPECS locked #7). Do **not** add token/class allowlists to `@code-invariants/react` (R3 → tailwind/DS). Do not implement backlog rows from [docs/rulesets/react.md](../../docs/rulesets/react.md) unless the task asks for that rule.
 2. Implement `Rule` with **no default `kind`**:
    - `meta.kind: "language"` **or** `"project"` (required)
    - Language: set `meta.languages` (non-empty, e.g. `["typescript"]`); `create` uses `LanguageRuleContext` (`getProject` / `getSources` / `getSource` / `getFilenames`). Same idea on two languages ⇒ two language rules.
@@ -26,7 +26,7 @@ Add **one** rule to an existing plugin, with fixtures and tests.
 3. Add fixtures:
    - **valid** samples that must produce zero violations
    - **invalid** samples that must produce the expected `ruleId` and clear messages
-4. Assert in tests on rule id, message usefulness, and location when applicable.
+4. Assert in tests on rule id, message usefulness, location, and a **concrete** `suggestion` (product rules must not use `NO_SUGGESTION`).
 5. Register the rule on the plugin’s `rules` map.
 6. If the rule is part of a published ruleset doc, add or update a row there in the same PR when behavior is user-facing.
 7. Prefer incremental analysis friendliness (no full-repo work per file unless the rule truly needs the graph — e.g. layer hierarchy).

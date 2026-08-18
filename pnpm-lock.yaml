@@ -31,6 +31,19 @@ importers:
         specifier: ^26.2.0
         version: 26.2.0
 
+  packages/react:
+    dependencies:
+      code-invariants:
+        specifier: workspace:*
+        version: link:../code-invariants
+      ts-morph:
+        specifier: ^28.0.0
+        version: 28.0.0
+    devDependencies:
+      '@types/node':
+        specifier: ^26.2.0
+        version: 26.2.0
+
   packages/typescript:
     dependencies:
       code-invariants:

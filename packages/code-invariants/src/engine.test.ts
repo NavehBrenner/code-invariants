@@ -257,6 +257,35 @@ test("enabled rule collects a violation and exits 1", async () => {
   const lines: string[] = [];
   expect(await check(dir, (m) => lines.push(String(m)), silent)).toBe(1);
   expect(lines.join("\n")).toMatch(/src\/hello\.ts:1:1\s+error\s+fixture\/ping\s+ping/);
+  expect(lines.join("\n")).not.toMatch(/suggestion:/);
+});
+
+test("prints suggestion line only when it is not the sentinel", async () => {
+  const dir = await writeTree({
+    "plugin.mjs": `export default {
+  name: "fixture",
+  rules: {
+    hint: {
+      meta: { kind: "language", languages: ["typescript"], docs: { description: "hint" } },
+      create(context) {
+        context.report({
+          severity: "error",
+          file: context.getFilenames()[0],
+          range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
+          message: "hint",
+          suggestion: "Do the thing.",
+        });
+      },
+    },
+  },
+};
+`,
+    "code-invariants.config.json": config({ "fixture/hint": "error" }),
+    "src/hello.ts": "export const n = 1;\n",
+  });
+  const lines: string[] = [];
+  expect(await check(dir, (m) => lines.push(String(m)), silent)).toBe(1);
+  expect(lines.join("\n")).toMatch(/suggestion: Do the thing\./);
 });
 
 test("enabled rule with no violations exits 0 without the empty-path message", async () => {
