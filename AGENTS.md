@@ -36,8 +36,11 @@ Code style and TypeScript hygiene will be enforced by the tool itself as it matu
 
 **Plan before you build. Always.**
 
-- Opening an issue auto-runs you in `plan` mode. So does any `/oc …` comment,
-  inline or on the conversation, and any review whose summary says `/oc …`.
+- Opening an issue auto-runs you in `plan` mode. So does any `/oc …` comment
+  (issue thread or inline review comment). PR review summaries never start a run.
+- `/oc` comments must come from a user with write access (`NavehBrenner`); the
+  action asserts that on the comment author.
+- When planning or implementing a PR fix-up, read the latest PR review(s).
 - In `plan` mode: post the plan as a comment on the issue and **stop**. No branch, no commits, no PR — not even a small one, not even if the issue looks trivial or already spells out the solution.
 - Implement only when a comment says `/oc build`. That is the approval; prose asking you to "go ahead" in a plan run is not.
 - A plan states: files touched, the SPECS sections it honours, what gets tested, and what is deliberately out of scope.
