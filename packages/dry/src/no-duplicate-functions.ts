@@ -1,43 +1,37 @@
-import type { ProjectRule, Range, StructuralCloneCluster, StructuralIndex } from "code-invariants";
-
-export type DuplicateReport = {
-  file: string;
-  range: Range;
-  message: string;
-  suggestion: string;
-  severity: "error";
-};
+import type { ProjectRule, Violation } from "code-invariants";
+import type { DupehoundCluster, DupehoundIndex } from "./dupehound.ts";
 
 export const noDuplicateFunctions: ProjectRule = {
   meta: {
     kind: "project",
-    requires: ["index"],
+    requires: ["dupehound"],
     docs: {
       description:
         "No structurally duplicate functions or methods in included non-test, non-generated sources (dupehound; not embeddings).",
     },
   },
   create(context) {
-    for (const item of reportsFromIndex(context.getIndex())) {
+    const index = context.getArtifact("dupehound") as DupehoundIndex;
+    for (const item of reportsFromIndex(index)) {
       context.report(item);
     }
   },
 };
 
-export function reportsFromIndex(index: StructuralIndex): DuplicateReport[] {
-  const reports: DuplicateReport[] = [];
+export function reportsFromIndex(index: DupehoundIndex): Omit<Violation, "ruleId">[] {
+  const reports: Omit<Violation, "ruleId">[] = [];
   for (const cluster of index.clusters) {
     reports.push(...reportsFromCluster(cluster));
   }
   return reports;
 }
 
-function reportsFromCluster(cluster: StructuralCloneCluster): DuplicateReport[] {
+function reportsFromCluster(cluster: DupehoundCluster): Omit<Violation, "ruleId">[] {
   const rep = cluster.members.find((member) => member.representative) ?? cluster.members[0];
   if (rep === undefined) {
     return [];
   }
-  const reports: DuplicateReport[] = [];
+  const reports: Omit<Violation, "ruleId">[] = [];
   for (const member of cluster.members) {
     if (member === rep || member.representative) {
       continue;

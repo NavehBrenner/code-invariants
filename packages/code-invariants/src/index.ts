@@ -59,32 +59,10 @@ export interface LanguageRuleMeta extends RuleMetaBase {
 export interface ProjectRuleMeta extends RuleMetaBase {
   kind: "project";
   /**
-   * Optional seam. `"index"` is a structural clone snapshot via dupehound
-   * (`getIndex()`), not embeddings.
+   * Artifact ids this rule needs (e.g. `"dupehound"`). Engine builds each id
+   * once via a plugin `provides` entry. Not embeddings; not a generic `"index"`.
    */
-  requires?: Array<"index">;
-}
-
-export interface StructuralCloneMember {
-  file: string;
-  name: string;
-  startLine: number;
-  endLine: number;
-  representative: boolean;
-  test: boolean;
-}
-
-export interface StructuralCloneCluster {
-  id: number;
-  similarity: number;
-  testOnly: boolean;
-  members: StructuralCloneMember[];
-}
-
-/** Ephemeral structural clone snapshot. Not a vector store. */
-export interface StructuralIndex {
-  kind: "structural";
-  clusters: readonly StructuralCloneCluster[];
+  requires?: string[];
 }
 
 export interface LanguageRuleContext {
@@ -117,10 +95,24 @@ export interface ProjectRuleContext {
   /** Workspace paths under include/exclude (display paths, stable order). */
   getFiles(): readonly string[];
   /**
-   * Structural clone snapshot. Only rules with `meta.requires: ["index"]`
-   * may call this; others get an exit-2 error.
+   * Project artifact built for this run. Only ids listed in `meta.requires`
+   * may be requested; others get an exit-2 error.
    */
-  getIndex(): StructuralIndex;
+  getArtifact(id: string): unknown;
+}
+
+/** Input to a plugin `provides` build. Built once per required id per check. */
+export interface ArtifactBuildContext {
+  cwd: string;
+  /** Display paths under include/exclude (stable order). */
+  files: readonly string[];
+  exclude: readonly string[];
+  /** Enabled rule ids that listed this artifact in `meta.requires`. */
+  requiredBy: readonly string[];
+}
+
+export interface ArtifactProvider {
+  build(ctx: ArtifactBuildContext): Promise<unknown> | unknown;
 }
 
 /** Returned by `create` when a rule wants per-node visiting instead of a one-shot pass. */
@@ -159,6 +151,11 @@ export interface Plugin {
   name: string;
   version?: string;
   rules?: Record<string, Rule>;
+  /**
+   * Project artifacts this plugin can build. Engine unions `requires` from
+   * enabled project rules, invokes matching providers once, and caches results.
+   */
+  provides?: Record<string, ArtifactProvider>;
   configs?: {
     recommended?: Partial<UserConfig>;
   };

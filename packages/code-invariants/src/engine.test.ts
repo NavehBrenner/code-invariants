@@ -446,7 +446,7 @@ test("language rule for a language with no frontend exits 2", async () => {
 test("requires on a language rule exits 2", async () => {
   const dir = await writeTree({
     "plugin.mjs": pluginWith(
-      `{ kind: "language", languages: ["typescript"], requires: ["index"], docs: { description: "bad requires" } }`,
+      `{ kind: "language", languages: ["typescript"], requires: ["dupehound"], docs: { description: "bad requires" } }`,
     ),
     "code-invariants.config.json": config({ "fixture/ping": "error" }),
     "src/hello.ts": "export const n = 1;\n",
@@ -456,199 +456,147 @@ test("requires on a language rule exits 2", async () => {
   expect(errors.join("\n")).toMatch(/must not set requires/);
 });
 
-test("project rule that requires index exits 2 when dupehound is missing", async () => {
+const fakeProviderPlugin = `let builds = 0;
+export default {
+  name: "fixture",
+  provides: {
+    fake: {
+      async build(ctx) {
+        builds += 1;
+        return { builds, files: ctx.files, requiredBy: ctx.requiredBy };
+      },
+    },
+  },
+  rules: {
+    alpha: {
+      meta: { kind: "project", requires: ["fake"], docs: { description: "reads fake" } },
+      create(context) {
+        const art = context.getArtifact("fake");
+        context.report({
+          severity: "error",
+          file: context.getFiles()[0],
+          range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
+          message: \`alpha builds=\${art.builds} by=\${art.requiredBy.join(",")}\`,
+          suggestion: "n/a",
+        });
+      },
+    },
+    beta: {
+      meta: { kind: "project", requires: ["fake"], docs: { description: "reads fake too" } },
+      create(context) {
+        const art = context.getArtifact("fake");
+        context.report({
+          severity: "error",
+          file: context.getFiles()[0],
+          range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
+          message: \`beta builds=\${art.builds}\`,
+          suggestion: "n/a",
+        });
+      },
+    },
+  },
+};
+`;
+
+test("artifact provider builds once and exposes getArtifact", async () => {
+  const dir = await writeTree({
+    "plugin.mjs": fakeProviderPlugin,
+    "code-invariants.config.json": config({
+      "fixture/alpha": "error",
+      "fixture/beta": "error",
+    }),
+    "src/hello.ts": "export const n = 1;\n",
+  });
+  const lines: string[] = [];
+  expect(await check(dir, (m) => lines.push(String(m)), silent)).toBe(1);
+  const out = lines.join("\n");
+  expect(out).toMatch(/fixture\/alpha\s+alpha builds=1 by=fixture\/alpha,fixture\/beta/);
+  expect(out).toMatch(/fixture\/beta\s+beta builds=1/);
+});
+
+test("missing provider exits 2 and names the rule", async () => {
   const dir = await writeTree({
     "plugin.mjs": pluginWith(
-      `{ kind: "project", requires: ["index"], docs: { description: "needs index" } }`,
+      `{ kind: "project", requires: ["ghost"], docs: { description: "needs ghost" } }`,
     ),
     "code-invariants.config.json": config({ "fixture/ping": "error" }),
     "src/hello.ts": "export const n = 1;\n",
   });
   const errors: string[] = [];
-  const prevPath = process.env.PATH;
-  const prevBin = process.env.CODE_INVARIANTS_DUPEHOUND;
-  try {
-    delete process.env.CODE_INVARIANTS_DUPEHOUND;
-    process.env.PATH = "/nonexistent";
-    expect(await check(dir, silent, (m) => errors.push(String(m)))).toBe(2);
-  } finally {
-    process.env.PATH = prevPath;
-    if (prevBin === undefined) {
-      delete process.env.CODE_INVARIANTS_DUPEHOUND;
-    } else {
-      process.env.CODE_INVARIANTS_DUPEHOUND = prevBin;
-    }
-  }
-  expect(errors.join("\n")).toMatch(/dupehound/i);
+  expect(await check(dir, silent, (m) => errors.push(String(m)))).toBe(2);
+  expect(errors.join("\n")).toMatch(/No plugin provides artifact "ghost"/);
   expect(errors.join("\n")).toMatch(/fixture\/ping/);
 });
 
-test("index-backed project rule with stub empty clusters exits 0", async () => {
-  const dir = await writeTree({
-    "plugin.mjs": pluginWith(
-      `{ kind: "project", requires: ["index"], docs: { description: "needs index" } }`,
-    ),
-    "code-invariants.config.json": config({ "fixture/ping": "error" }),
-    "src/hello.ts": "export const n = 1;\n",
-  });
-  const stub = join(dir, "dupehound-stub.mjs");
-  await writeFile(
-    stub,
-    `#!/usr/bin/env node
-process.stdout.write(${JSON.stringify(JSON.stringify({ schema_version: 2, clusters: [] }))});
-`,
-    { mode: 0o755 },
-  );
-  const prevBin = process.env.CODE_INVARIANTS_DUPEHOUND;
-  try {
-    process.env.CODE_INVARIANTS_DUPEHOUND = stub;
-    const lines: string[] = [];
-    expect(await check(dir, (m) => lines.push(String(m)), silent)).toBe(0);
-    expect(lines.join("\n")).not.toMatch(/nothing to check/);
-  } finally {
-    if (prevBin === undefined) {
-      delete process.env.CODE_INVARIANTS_DUPEHOUND;
-    } else {
-      process.env.CODE_INVARIANTS_DUPEHOUND = prevBin;
-    }
-  }
-});
-
-test("index-backed project rule sees stub clusters via getIndex", async () => {
-  const report = {
-    schema_version: 2,
-    clusters: [
-      {
-        id: 1,
-        similarity: 1,
-        test_only: false,
-        members: [
-          {
-            file: "src/a.ts",
-            name: "alpha",
-            start_line: 1,
-            end_line: 8,
-            representative: true,
-            test: false,
-          },
-          {
-            file: "src/b.ts",
-            name: "beta",
-            start_line: 1,
-            end_line: 8,
-            representative: false,
-            test: false,
-          },
-        ],
-      },
-    ],
-  };
+test("provider build throw exits 2 and names the rule", async () => {
   const dir = await writeTree({
     "plugin.mjs": `export default {
   name: "fixture",
-  rules: {
-    peek: {
-      meta: { kind: "project", requires: ["index"], docs: { description: "reads index" } },
-      create(context) {
-        const index = context.getIndex();
-        for (const cluster of index.clusters) {
-          context.report({
-            severity: "error",
-            file: cluster.members[0].file,
-            range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
-            message: \`cluster \${cluster.id} n=\${cluster.members.length}\`,
-            suggestion: "reuse the representative",
-          });
-        }
+  provides: {
+    fake: {
+      build() {
+        throw new Error("provider exploded");
       },
+    },
+  },
+  rules: {
+    ping: {
+      meta: { kind: "project", requires: ["fake"], docs: { description: "needs fake" } },
+      create() {},
     },
   },
 };
 `,
-    "code-invariants.config.json": config({ "fixture/peek": "error" }),
-    "src/a.ts": "export const a = 1;\n",
-    "src/b.ts": "export const b = 2;\n",
-  });
-  const stub = join(dir, "dupehound-stub.mjs");
-  await writeFile(
-    stub,
-    `#!/usr/bin/env node
-process.stdout.write(${JSON.stringify(JSON.stringify(report))});
-`,
-    { mode: 0o755 },
-  );
-  const prevBin = process.env.CODE_INVARIANTS_DUPEHOUND;
-  try {
-    process.env.CODE_INVARIANTS_DUPEHOUND = stub;
-    const lines: string[] = [];
-    expect(await check(dir, (m) => lines.push(String(m)), silent)).toBe(1);
-    expect(lines.join("\n")).toMatch(/fixture\/peek\s+cluster 1 n=2/);
-  } finally {
-    if (prevBin === undefined) {
-      delete process.env.CODE_INVARIANTS_DUPEHOUND;
-    } else {
-      process.env.CODE_INVARIANTS_DUPEHOUND = prevBin;
-    }
-  }
-});
-
-test("unrunnable dupehound or bad JSON exits 2", async () => {
-  const dir = await writeTree({
-    "plugin.mjs": pluginWith(
-      `{ kind: "project", requires: ["index"], docs: { description: "needs index" } }`,
-    ),
     "code-invariants.config.json": config({ "fixture/ping": "error" }),
     "src/hello.ts": "export const n = 1;\n",
   });
-  const stub = join(dir, "dupehound-stub.mjs");
-  await writeFile(
-    stub,
-    `#!/usr/bin/env node
-process.stdout.write("not-json");
-`,
-    { mode: 0o755 },
-  );
-  const prevBin = process.env.CODE_INVARIANTS_DUPEHOUND;
-  try {
-    process.env.CODE_INVARIANTS_DUPEHOUND = stub;
-    const errors: string[] = [];
-    expect(await check(dir, silent, (m) => errors.push(String(m)))).toBe(2);
-    expect(errors.join("\n")).toMatch(/dupehound/i);
-  } finally {
-    if (prevBin === undefined) {
-      delete process.env.CODE_INVARIANTS_DUPEHOUND;
-    } else {
-      process.env.CODE_INVARIANTS_DUPEHOUND = prevBin;
-    }
-  }
+  const errors: string[] = [];
+  expect(await check(dir, silent, (m) => errors.push(String(m)))).toBe(2);
+  expect(errors.join("\n")).toMatch(/provider exploded/);
+  expect(errors.join("\n")).toMatch(/fixture\/ping/);
 });
 
-test("project rule without requires still works and getIndex throws", async () => {
+test("duplicate artifact id exits 2", async () => {
   const dir = await writeTree({
     "plugin.mjs": `export default {
   name: "fixture",
+  provides: { fake: { build() { return 1; } } },
+  rules: {
+    ping: {
+      meta: { kind: "project", requires: ["fake"], docs: { description: "needs fake" } },
+      create() {},
+    },
+  },
+};
+`,
+    "other.mjs": `export default {
+  name: "other",
+  provides: { fake: { build() { return 2; } } },
+  rules: {},
+};
+`,
+    "code-invariants.config.json": JSON.stringify({
+      languages: ["typescript"],
+      plugins: ["./plugin.mjs", "./other.mjs"],
+      rules: { "fixture/ping": "error" },
+    }),
+    "src/hello.ts": "export const n = 1;\n",
+  });
+  const errors: string[] = [];
+  expect(await check(dir, silent, (m) => errors.push(String(m)))).toBe(2);
+  expect(errors.join("\n")).toMatch(/Artifact "fake" is provided by more than one plugin/);
+});
+
+test("getArtifact without require exits 2", async () => {
+  const dir = await writeTree({
+    "plugin.mjs": `export default {
+  name: "fixture",
+  provides: { fake: { build() { return { ok: true }; } } },
   rules: {
     listed: {
-      meta: { kind: "project", docs: { description: "no index" } },
+      meta: { kind: "project", docs: { description: "no require" } },
       create(context) {
-        try {
-          context.getIndex();
-          context.report({
-            severity: "error",
-            file: "src/hello.ts",
-            range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
-            message: "getIndex should have thrown",
-          });
-        } catch (e) {
-          if (!/getIndex\\(\\) requires meta.requires/.test(String(e))) {
-            context.report({
-              severity: "error",
-              file: "src/hello.ts",
-              range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
-              message: String(e),
-            });
-          }
-        }
+        context.getArtifact("fake");
       },
     },
   },
@@ -657,22 +605,9 @@ test("project rule without requires still works and getIndex throws", async () =
     "code-invariants.config.json": config({ "fixture/listed": "error" }),
     "src/hello.ts": "export const n = 1;\n",
   });
-  const prevPath = process.env.PATH;
-  const prevBin = process.env.CODE_INVARIANTS_DUPEHOUND;
-  try {
-    delete process.env.CODE_INVARIANTS_DUPEHOUND;
-    process.env.PATH = "/nonexistent";
-    const lines: string[] = [];
-    expect(await check(dir, (m) => lines.push(String(m)), silent)).toBe(0);
-    expect(lines.join("\n")).not.toMatch(/getIndex/);
-  } finally {
-    process.env.PATH = prevPath;
-    if (prevBin === undefined) {
-      delete process.env.CODE_INVARIANTS_DUPEHOUND;
-    } else {
-      process.env.CODE_INVARIANTS_DUPEHOUND = prevBin;
-    }
-  }
+  const errors: string[] = [];
+  expect(await check(dir, silent, (m) => errors.push(String(m)))).toBe(2);
+  expect(errors.join("\n")).toMatch(/getArtifact\("fake"\) requires meta.requires/);
 });
 
 test("mixed language and project rules both report", async () => {

@@ -26,7 +26,7 @@ These decisions are considered stable unless a major new constraint appears:
 4. **Plugins**  
    First-class and user-writable. There is one explicit contract (see § Plugin contract). Plugins can be published as npm packages or loaded from local paths. Agent skills for creating and maintaining plugins are part of the deliverable.  
    **v1 plugin language is TypeScript only.** Plugins are TypeScript/JavaScript packages that export the `Plugin` interface. Python-written plugins may be supported later via the same protocol once a Python frontend exists.  
-    **Core has no built-in rule bag.** Every check is a plugin rule. Core is the engine, language frontends, config/CLI, and the structural index capability (dupehound wrap) — not a default catalog. Baseline TypeScript rules live in `@code-invariants/typescript` (`Plugin.name: "ts"`). React compositional rules live in `@code-invariants/react` (`Plugin.name: "react"`). Structural DRY lives in `@code-invariants/dry` (`Plugin.name: "dry"`). A plugin may ship `configs.recommended`; installing a plugin does **not** enable its rules (locked #2).
+    **Core has no built-in rule bag.** Every check is a plugin rule. Core is the engine, language frontends, config/CLI, and a generic project-artifact seam — not a default catalog and **not** a dupehound (or other niche binary) host. Baseline TypeScript rules live in `@code-invariants/typescript` (`Plugin.name: "ts"`). React compositional rules live in `@code-invariants/react` (`Plugin.name: "react"`). Structural DRY lives in `@code-invariants/dry` (`Plugin.name: "dry"`), which **provides** the `dupehound` artifact. A plugin may ship `configs.recommended`; installing a plugin does **not** enable its rules (locked #2).
 
 5. **Runtime helpers**  
    Optional companion packages (e.g. a future official `DataRegion`). Static rules work both with the official helpers and with equivalent structural patterns the user already has. **Helpers are optional; this WP ships none.** TanStack Query detectors live under `@code-invariants/react`, not a separate package.
@@ -52,7 +52,7 @@ These decisions are considered stable unless a major new constraint appears:
 
    **Language rules** (`kind: "language"`) must declare a non-empty `languages` array. Each frontend parses that language **once per language run** and returns a `ParsedProject` (native `project` + `sources` map). The same object is reused by every language rule for that language. `create` runs once per enabled language rule **per language** and receives `LanguageRuleContext` (`language`, `getProject`, `getSources`, `getSource(name)`, `getFilenames`). A language rule is never given another language’s parse, and must not set `requires`.
 
-    **Project rules** (`kind: "project"`) are **workspace-level**, not a ts-morph `Project`. They run in a **separate** pipeline with `ProjectRuleContext` (`getCwd`, `getFiles`, `getIndex` when required). They never receive `getProject()` / source units / language AST APIs. Name clash: `kind: "project"` ≠ `getProject()`. Optional `requires?: Array<"index">` is implemented as an ephemeral structural clone snapshot: when any enabled project rule requires `"index"`, the engine runs `dupehound scan --json` once and exposes `getIndex()`. Missing / unrunnable binary, timeout, or invalid JSON → exit 2 (fail closed). Not a vector store. `code-invariants index` CLI stays unimplemented.
+     **Project rules** (`kind: "project"`) are **workspace-level**, not a ts-morph `Project`. They run in a **separate** pipeline with `ProjectRuleContext` (`getCwd`, `getFiles`, `getArtifact` when required). They never receive `getProject()` / source units / language AST APIs. Name clash: `kind: "project"` ≠ `getProject()`. Optional `requires?: string[]` names **project artifacts**. The engine unions `requires` from **enabled** project rules, invokes matching plugin `provides[id].build` **once** per id, caches the result, and exposes it via `getArtifact(id)`. Missing provider, duplicate provider id, or build throw → exit 2 (fail closed); the message names the rule id(s). Language ASTs stay on the frontend path (parse once, share) — not this table. Not a vector store. `code-invariants index` CLI stays unimplemented. Dupehound (structural fingerprints / winnowing, **not** embeddings) is provided by `@code-invariants/dry` as artifact id `"dupehound"`.
 
    This avoids both the precision loss of a lowest-common-denominator IR and the cost of re-parsing for every rule, and keeps non-AST checks out of the language loop.
 
@@ -77,18 +77,18 @@ These decisions are considered stable unless a major new constraint appears:
                              │
 ┌────────────────────────────▼────────────────────────────────┐
 │                     Rule Engine (core)                      │
-│  - loads rule plugins                                       │
-│  - orchestrates frontends                                   │
+│  - loads plugins                                            │
+│  - orchestrates frontends + project artifacts               │
 │  - collects violations with location + fix hints            │
 └──────────────┬──────────────────────────────┬───────────────┘
                │                              │
       ┌─────────▼─────────┐          ┌─────────▼─────────┐
-      │  Language Frontends│          │  Structural Index │
-      │  - TypeScript      │          │  (dupehound scan) │
-      │    (ts-morph)      │          │  Vector store     │
-      │  - Python (later)  │          │  remains later    │
-      │    (libCST /       │          └───────────────────┘
-      │     tree-sitter)   │
+      │  Language Frontends│          │  Project artifacts│
+      │  - TypeScript      │          │  (plugin provides)│
+      │    (ts-morph)      │          │  e.g. dupehound   │
+      │  - Python (later)  │          │  in @…/dry        │
+      │    (libCST /       │          │  embeddings later │
+      │     tree-sitter)   │          └───────────────────┘
       └────────────────────┘
 ```
 
@@ -102,8 +102,8 @@ These decisions are considered stable unless a major new constraint appears:
 
   Product rules in this repo (`ts/public-exports-tested`, `react/no-fetch-in-useeffect`, `react/query-error-handled`, `dry/no-duplicate-functions`) **must** use concrete suggestions, not the sentinel. CLI prints a `suggestion:` line unless the value is exactly `NO_SUGGESTION`. `report()` fills the sentinel at runtime if the field is missing (JS plugins keep working).
 - **Frontend**: Language-specific AST / symbol provider that implements the frontend protocol.
-- **Plugin**: A package that exports one or more rules (and optionally recommended configs) conforming to the plugin contract.
-- **Index**: Structural clone snapshot via dupehound when an enabled project rule `requires: ["index"]`. Vector / embedding index is still future.
+- **Plugin**: A package that exports one or more rules (and optionally recommended configs and `provides` artifact builders) conforming to the plugin contract.
+- **Artifact**: Opaque value built once per check when an enabled project rule `requires` its id. `@code-invariants/dry` provides `"dupehound"` (structural fingerprints). Vector / embedding index is still future.
 
 ## 2. Plugin contract (explicit)
 
@@ -114,9 +114,21 @@ export interface Plugin {
   name: string;                 // e.g. "react" or "@my-org/internal"
   version?: string;
   rules?: Record<string, Rule>;
+  provides?: Record<string, ArtifactProvider>;
   configs?: {
     recommended?: Partial<UserConfig>;
   };
+}
+
+export interface ArtifactProvider {
+  build(ctx: ArtifactBuildContext): Promise<unknown> | unknown;
+}
+
+export interface ArtifactBuildContext {
+  cwd: string;
+  files: readonly string[];     // display paths, stable order
+  exclude: readonly string[];
+  requiredBy: readonly string[]; // enabled rule ids that require this artifact
 }
 
 export type Rule = LanguageRule | ProjectRule; // discriminated on meta.kind; no default
@@ -135,7 +147,7 @@ export interface LanguageRule {
 export interface ProjectRule {
   meta: {
     kind: "project";            // workspace-level, **not** ts-morph Project
-    requires?: Array<"index">;  // structural clone snapshot via dupehound
+    requires?: string[];        // artifact ids (this plugin: ["dupehound"])
     docs: { description: string; url?: string };
     schema?: JSONSchema;
     fixable?: "code" | "whitespace";
@@ -154,34 +166,13 @@ export interface LanguageRuleContext {
   getSource(filename: string): SourceUnit | undefined;
 }
 
-export interface StructuralCloneMember {
-  file: string;
-  name: string;
-  startLine: number;
-  endLine: number;
-  representative: boolean;
-  test: boolean;
-}
-
-export interface StructuralCloneCluster {
-  id: number;
-  similarity: number;
-  testOnly: boolean;
-  members: StructuralCloneMember[];
-}
-
-export interface StructuralIndex {
-  kind: "structural";
-  clusters: readonly StructuralCloneCluster[];
-}
-
 export interface ProjectRuleContext {
   id: string;
   options: unknown;
   report(violation: Omit<Violation, "ruleId">): void;
   getCwd(): string;
   getFiles(): readonly string[]; // display paths, stable order; no AST APIs
-  getIndex(): StructuralIndex;   // only if meta.requires includes "index"
+  getArtifact(id: string): unknown; // only if meta.requires includes id
 }
 
 export interface LanguageFrontend {
@@ -197,7 +188,7 @@ export interface ParsedProject {
 }
 ```
 
-Language rules: `create` is invoked once per enabled rule **per language**, not once per file, and only for languages in both `meta.languages` and `config.languages`. Project rules (`kind: "project"` = workspace-level, **not** ts-morph `Project`) run in a separate pipeline and must not receive language AST context. Rules never touch the filesystem or the CLI; they only receive their context and call `context.report`. This keeps them testable and isolatable.
+Language rules: `create` is invoked once per enabled rule **per language**, not once per file, and only for languages in both `meta.languages` and `config.languages`. Project rules (`kind: "project"` = workspace-level, **not** ts-morph `Project`) run in a separate pipeline and must not receive language AST context. Rules never touch the filesystem or the CLI; they only receive their context and call `context.report`. A plugin `provides.build` function **may** spawn tools; rules must not. This keeps rules testable and isolatable.
 
 Enabled language rule whose `languages` do not intersect `config.languages` is an error (do not silently skip). A language listed on an enabled rule with no frontend is an error. `requires` on a language rule is an error. Missing/invalid `kind` or empty `languages` on a language rule is an error.
 
@@ -258,21 +249,21 @@ Implemented in `@code-invariants/react`.
 ### R4 — Structural DRY (`dry/no-duplicate-functions`)
 
 Implemented in `@code-invariants/dry` as **`dry/no-duplicate-functions`**.  
-`kind: "project"`, `requires: ["index"]`. Uses only `ProjectRuleContext` (`getCwd`, `getFiles`, `getIndex`, `report`). We wrap [dupehound](https://github.com/Rafaelpta/dupehound) `scan --json`; we do not reimplement fingerprints.
+`kind: "project"`, `requires: ["dupehound"]`. Uses only `ProjectRuleContext` (`getCwd`, `getFiles`, `getArtifact`, `report`). The **dry plugin** wraps [dupehound](https://github.com/Rafaelpta/dupehound) `scan --json` in `provides.dupehound.build`; core does not spawn it. We do not reimplement fingerprints.
 
 **Intent:** No structurally duplicate functions/methods in included non-test, non-generated sources.
 
 | Topic | Decision |
 |--------|----------|
-| Engine | dupehound structural fingerprints (tree-sitter + winnowing). Engine invokes the CLI once per check when any enabled project rule `requires: ["index"]` and exposes `getIndex()`. |
-| Out | Embeddings, Slopo, `query --similar`, auto-merge / codemods. Incremental `dupehound check --diff` is later (`--diff` / WP-015). |
+| Engine | dupehound structural fingerprints (tree-sitter + winnowing — **not** embeddings). Dry provides artifact `"dupehound"`; the engine builds it once when any enabled project rule `requires: ["dupehound"]` and exposes `getArtifact("dupehound")`. |
+| Out | Embeddings, Slopo, `query --similar`, auto-merge / codemods, TypeScript interface/type-alias / whole-class clone detection (needs another provider, e.g. similarity-ts or the checker — not more dupehound flags). Incremental `dupehound check --diff` is later (`--diff` / WP-015). |
 | Unit | All function-likes dupehound extracts (top-level, methods, arrow/`const` function-likes, `<anonymous>`). |
 | Skip | Tests (`--exclude-tests` + path rules), generated (dupehound defaults + our exclude), files outside include (post-filter). |
 | Threshold | dupehound scan default (0.80). Not configurable in v1. |
 | `min_tokens` | 40 (dupehound default). Short functions are a known miss. |
-| Violation | Copy (non-representative) location; message names both functions and similarity; concrete reuse suggestion pointing at the original. Never `NO_SUGGESTION`. Range is best-effort (lines only, column 1). |
+| Violation | Copy (non-representative) location; `Omit<Violation, "ruleId">` only (engine stamps severity from config). Message names both functions and similarity; concrete reuse suggestion pointing at the original. Never `NO_SUGGESTION`. Range is best-effort (lines only, column 1). |
 | Severity | `"error"` in recommended; config may set `"warn"`. No extra soft-gate product mode. |
-| Capability | `requires: ["index"]`. Fail closed (exit 2, clear message) if dupehound is missing, unrunnable, times out, or returns invalid JSON. Empty clusters after test/generated skip is success, not an error. |
+| Capability | `requires: ["dupehound"]`. Fail closed (exit 2, clear message naming the rule) if the provider is missing, dupehound is missing / unrunnable, times out, or returns invalid JSON. Empty clusters after test/generated skip is success, not an error. |
 | Install | Binary on `PATH` or `CODE_INVARIANTS_DUPEHOUND`. Pin **v0.1.2**. No network in default `check`. Optional `scripts/install-dupehound.sh` for local/CI. |
 
 **Recommended:** `configs.recommended.rules["dry/no-duplicate-functions"] = "error"`. Install does **not** apply recommended (locked #2 / #4).

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants } from "node:fs";
 import { delimiter, isAbsolute, join } from "node:path";
-import type { StructuralCloneCluster, StructuralCloneMember, StructuralIndex } from "./index.ts";
+import type { ArtifactBuildContext } from "code-invariants";
 
 export const DUPEHOUND_PIN = "v0.1.2";
 export const DUPEHOUND_ENV = "CODE_INVARIANTS_DUPEHOUND";
@@ -9,18 +9,34 @@ export const SCAN_TIMEOUT_MS = 60_000;
 
 const ACCEPTED_SCHEMA_VERSIONS = new Set([1, 2]);
 
-export class IndexError extends Error {
+export class DupehoundError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "IndexError";
+    this.name = "DupehoundError";
   }
 }
 
-export type LoadStructuralIndexOptions = {
-  cwd: string;
-  exclude: readonly string[];
-  includeFiles: readonly string[];
-  requiredBy: readonly string[];
+export type DupehoundMember = {
+  file: string;
+  name: string;
+  startLine: number;
+  endLine: number;
+  representative: boolean;
+  test: boolean;
+};
+
+export type DupehoundCluster = {
+  id: number;
+  similarity: number;
+  testOnly: boolean;
+  members: DupehoundMember[];
+};
+
+export type DupehoundIndex = {
+  clusters: readonly DupehoundCluster[];
+};
+
+export type BuildDupehoundOptions = ArtifactBuildContext & {
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
 };
@@ -61,7 +77,7 @@ export function resolveDupehoundBinary(
     }
     const found = findOnPath(override, env.PATH ?? "");
     if (found === undefined) {
-      throw new IndexError(
+      throw new DupehoundError(
         `${DUPEHOUND_ENV} is set to "${override}" but that command is not on PATH.`,
       );
     }
@@ -69,14 +85,12 @@ export function resolveDupehoundBinary(
   }
   const found = findOnPath("dupehound", env.PATH ?? "");
   if (found === undefined) {
-    throw new IndexError(missingBinaryMessage([]));
+    throw new DupehoundError(missingBinaryMessage([]));
   }
   return found;
 }
 
-export async function loadStructuralIndex(
-  options: LoadStructuralIndexOptions,
-): Promise<StructuralIndex> {
+export async function buildDupehoundIndex(options: BuildDupehoundOptions): Promise<DupehoundIndex> {
   const requiredBy = options.requiredBy;
   const env = options.env ?? process.env;
   let bin: string;
@@ -95,22 +109,22 @@ export async function loadStructuralIndex(
   const timeoutMs = options.timeoutMs ?? SCAN_TIMEOUT_MS;
   const result = await runCommand(bin, args, options.cwd, timeoutMs);
   if (result.timedOut) {
-    throw new IndexError(
+    throw new DupehoundError(
       `dupehound timed out after ${timeoutMs / 1000}s (required by ${byLabel(requiredBy)}).`,
     );
   }
   if (result.error !== undefined) {
-    throw new IndexError(
+    throw new DupehoundError(
       `dupehound is not runnable (required by ${byLabel(requiredBy)}): ${result.error}`,
     );
   }
   if (result.code !== 0) {
     const text = `${result.stdout}\n${result.stderr}`;
     if (/no supported source files/i.test(text)) {
-      return { kind: "structural", clusters: [] };
+      return { clusters: [] };
     }
     const detail = result.stderr.trim() || result.stdout.trim() || `exit ${result.code}`;
-    throw new IndexError(`dupehound failed (required by ${byLabel(requiredBy)}): ${detail}`);
+    throw new DupehoundError(`dupehound failed (required by ${byLabel(requiredBy)}): ${detail}`);
   }
 
   let parsed: ParsedScanReport;
@@ -118,11 +132,11 @@ export async function loadStructuralIndex(
     parsed = parseScanReport(result.stdout);
   } catch (e) {
     const detail = e instanceof Error ? e.message : String(e);
-    throw new IndexError(
+    throw new DupehoundError(
       `dupehound produced invalid JSON (required by ${byLabel(requiredBy)}): ${detail}`,
     );
   }
-  return { kind: "structural", clusters: filterClusters(parsed.clusters, options.includeFiles) };
+  return { clusters: filterClusters(parsed.clusters, options.files) };
 }
 
 export function parseScanReport(raw: string): ParsedScanReport {
@@ -130,20 +144,20 @@ export function parseScanReport(raw: string): ParsedScanReport {
   try {
     value = JSON.parse(raw.trim());
   } catch {
-    throw new IndexError("stdout is not JSON");
+    throw new DupehoundError("stdout is not JSON");
   }
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new IndexError("JSON root must be an object");
+    throw new DupehoundError("JSON root must be an object");
   }
   const rec = value as Record<string, unknown>;
   const schemaVersion = rec.schema_version;
   if (typeof schemaVersion !== "number" || !ACCEPTED_SCHEMA_VERSIONS.has(schemaVersion)) {
-    throw new IndexError(
+    throw new DupehoundError(
       `unsupported schema_version ${JSON.stringify(schemaVersion)}; expected 1 or 2`,
     );
   }
   if (!Array.isArray(rec.clusters)) {
-    throw new IndexError("missing clusters array");
+    throw new DupehoundError("missing clusters array");
   }
   return {
     schemaVersion,
@@ -154,9 +168,9 @@ export function parseScanReport(raw: string): ParsedScanReport {
 export function filterClusters(
   clusters: readonly RawCluster[],
   includeFiles: readonly string[],
-): StructuralCloneCluster[] {
+): DupehoundCluster[] {
   const include = new Set(includeFiles.map(normalizeDisplay));
-  const out: StructuralCloneCluster[] = [];
+  const out: DupehoundCluster[] = [];
   for (const cluster of clusters) {
     if (cluster.testOnly || cluster.traitImplOnly) {
       continue;
@@ -185,11 +199,11 @@ export function filterClusters(
 
 function parseCluster(value: unknown, index: number): RawCluster {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new IndexError(`clusters[${index}] must be an object`);
+    throw new DupehoundError(`clusters[${index}] must be an object`);
   }
   const rec = value as Record<string, unknown>;
   if (!Array.isArray(rec.members)) {
-    throw new IndexError(`clusters[${index}] missing members array`);
+    throw new DupehoundError(`clusters[${index}] missing members array`);
   }
   const members = rec.members.map((member, i) => parseMember(member, index, i));
   return {
@@ -203,15 +217,15 @@ function parseCluster(value: unknown, index: number): RawCluster {
 
 function parseMember(value: unknown, cluster: number, index: number): RawMember {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new IndexError(`clusters[${cluster}].members[${index}] must be an object`);
+    throw new DupehoundError(`clusters[${cluster}].members[${index}] must be an object`);
   }
   const rec = value as Record<string, unknown>;
   const prefix = `clusters[${cluster}].members[${index}]`;
   if (typeof rec.file !== "string" || rec.file.length === 0) {
-    throw new IndexError(`${prefix}.file must be a string`);
+    throw new DupehoundError(`${prefix}.file must be a string`);
   }
   if (typeof rec.name !== "string") {
-    throw new IndexError(`${prefix}.name must be a string`);
+    throw new DupehoundError(`${prefix}.name must be a string`);
   }
   return {
     file: rec.file,
@@ -224,7 +238,7 @@ function parseMember(value: unknown, cluster: number, index: number): RawMember 
   };
 }
 
-function toMember(member: RawMember): StructuralCloneMember {
+function toMember(member: RawMember): DupehoundMember {
   return {
     file: normalizeDisplay(member.file),
     name: member.name,
@@ -240,7 +254,7 @@ function asFiniteNumber(value: unknown, label: string, fallback: number): number
     return fallback;
   }
   if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new IndexError(`${label} must be a number`);
+    throw new DupehoundError(`${label} must be a number`);
   }
   return value;
 }
@@ -267,28 +281,32 @@ function assertRunnable(path: string, shown: string): void {
   try {
     accessSync(path, constants.X_OK);
   } catch {
-    throw new IndexError(`${DUPEHOUND_ENV} is set to "${shown}" but that binary is not runnable.`);
+    throw new DupehoundError(
+      `${DUPEHOUND_ENV} is set to "${shown}" but that binary is not runnable.`,
+    );
   }
 }
 
-function wrapMissing(e: unknown, requiredBy: readonly string[]): IndexError {
-  if (e instanceof IndexError) {
+function wrapMissing(e: unknown, requiredBy: readonly string[]): DupehoundError {
+  if (e instanceof DupehoundError) {
     if (e.message.includes("required by") || requiredBy.length === 0) {
       return e;
     }
     if (e.message.startsWith("Cannot run ")) {
-      return new IndexError(missingBinaryMessage(requiredBy));
+      return new DupehoundError(missingBinaryMessage(requiredBy));
     }
-    return new IndexError(`${e.message} (required by ${byLabel(requiredBy)}).`);
+    return new DupehoundError(`${e.message} (required by ${byLabel(requiredBy)}).`);
   }
-  return new IndexError(
+  return new DupehoundError(
     `dupehound is not runnable (required by ${byLabel(requiredBy)}): ${e instanceof Error ? e.message : String(e)}`,
   );
 }
 
 export function missingBinaryMessage(requiredBy: readonly string[]): string {
   const who =
-    requiredBy.length > 0 ? `Cannot run ${byLabel(requiredBy)}` : "Cannot run index-backed rules";
+    requiredBy.length > 0
+      ? `Cannot run ${byLabel(requiredBy)}`
+      : "Cannot run dupehound-backed rules";
   return (
     `${who}: dupehound is not installed or not runnable. ` +
     `Install ${DUPEHOUND_PIN} from https://github.com/Rafaelpta/dupehound/releases ` +
@@ -298,7 +316,7 @@ export function missingBinaryMessage(requiredBy: readonly string[]): string {
 }
 
 function byLabel(ids: readonly string[]): string {
-  return ids.length > 0 ? ids.join(", ") : "an index-backed rule";
+  return ids.length > 0 ? ids.join(", ") : "a dupehound-backed rule";
 }
 
 type CommandResult = {

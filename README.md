@@ -60,7 +60,7 @@ Full research notes and comparisons are in [docs/RESEARCH.md](docs/RESEARCH.md).
 
 ## Status
 
-The engine (`code-invariants check`) loads config, parses TypeScript once (ts-morph), and runs enabled plugin rules. Core has **no built-in rule bag**. Product plugins: [`@code-invariants/typescript`](packages/typescript) (`ts/public-exports-tested`), [`@code-invariants/react`](packages/react) (`react/no-fetch-in-useeffect`, `react/query-error-handled`), and [`@code-invariants/dry`](packages/dry) (`dry/no-duplicate-functions`, structural clones via dupehound). Multi-plugin configs load them together; catalog ids are namespaced (`ts/…` vs `react/…` vs `dry/…`). Every violation has a required `suggestion` (concrete text on product rules). With nothing configured, check reports that honestly and exits 0.
+The engine (`code-invariants check`) loads config, parses TypeScript once (ts-morph), and runs enabled plugin rules. Core has **no built-in rule bag** and **no dupehound (or other niche binary) host** — it only orchestrates language frontends and a generic project-artifact seam (`requires` → plugin `provides.build` once → `getArtifact`). Product plugins: [`@code-invariants/typescript`](packages/typescript) (`ts/public-exports-tested`), [`@code-invariants/react`](packages/react) (`react/no-fetch-in-useeffect`, `react/query-error-handled`), and [`@code-invariants/dry`](packages/dry) (`dry/no-duplicate-functions`; provides the `dupehound` structural-fingerprint artifact). Multi-plugin configs load them together; catalog ids are namespaced (`ts/…` vs `react/…` vs `dry/…`). Every violation has a required `suggestion` (concrete text on product rules). With nothing configured, check reports that honestly and exits 0.
 
 **Core architectural decisions are locked** in [docs/SPECS.md](docs/SPECS.md) (CLI shape, `defineConfig`, plugin contract, TypeScript-first core, no wrapping of Biome/ESLint, native AST per frontend, performance approach, etc.). Catalogs: [docs/rulesets/typescript.md](docs/rulesets/typescript.md), [docs/rulesets/react.md](docs/rulesets/react.md), [docs/rulesets/dry.md](docs/rulesets/dry.md).
 
@@ -95,7 +95,7 @@ Layout: `packages/code-invariants` (engine, CLI, plugin contract),
 1. **Phase 0** — Documentation & design ✅
 2. **Phase 1** — Core TypeScript engine ✅. Product rules: `@code-invariants/typescript` (`ts/public-exports-tested`) and `@code-invariants/react` (effect-fetch ban + R1-lite query error handling). R3 semantic tokens → future tailwind/DS plugin.
 3. **Phase 2** — CI integration, CLI, and basic MCP server so agents can query/check
-4. **Phase 3** — Structural DRY ✅ (`dry/no-duplicate-functions` via dupehound). Semantic DRY (vector index + similarity gate) remains later.
+4. **Phase 3** — Structural DRY ✅ (`dry/no-duplicate-functions` via plugin-owned dupehound fingerprints). Semantic DRY (vector index + similarity gate) remains later.
 5. **Phase 4** — Python support (libCST / tree-sitter + equivalent rules)
 6. **Phase 5** — Test-presence static checks + richer architecture fitness rules
 7. **Phase 6** — Polish, documentation, example monorepos, community rules registry

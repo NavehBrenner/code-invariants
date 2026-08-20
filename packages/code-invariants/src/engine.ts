@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { CONFIG_FILENAMES, ConfigError, loadConfig } from "./config.ts";
 import { createFrontend, hasFrontend } from "./frontend.ts";
 import {
+  type ArtifactProvider,
   type LanguageRule,
   NO_SUGGESTION,
   type Plugin,
@@ -11,11 +12,9 @@ import {
   type Rule,
   type Severity,
   type SourceUnit,
-  type StructuralIndex,
   type UserConfig,
   type Violation,
 } from "./index.ts";
-import { loadStructuralIndex } from "./structural-index.ts";
 
 const NOTHING_TO_CHECK = "No rules configured — nothing to check.";
 const DEFAULT_INCLUDE = ["**/*.ts", "**/*.tsx", "**/*.mts", "**/*.cts"];
@@ -127,24 +126,19 @@ async function runCheck(cwd: string, out: (msg: string) => void): Promise<number
 
   if (workspaceFiles !== undefined && workspaceFiles.length > 0) {
     const displayPaths = workspaceFiles.map((abs) => displayPath(cwd, abs));
-    const indexRules = projectRules.filter((item) => requiresIndex(item.rule));
-    const index =
-      indexRules.length > 0
-        ? await loadStructuralIndex({
-            cwd,
-            exclude: mergedExclude(config),
-            includeFiles: displayPaths,
-            requiredBy: indexRules.map((item) => item.id),
-          })
-        : undefined;
+    const artifacts = await buildRequiredArtifacts(plugins, projectRules, {
+      cwd,
+      files: displayPaths,
+      exclude: mergedExclude(config),
+    });
     for (const item of projectRules) {
-      const wantsIndex = requiresIndex(item.rule);
+      const allowed = new Set(item.rule.meta.requires ?? []);
       item.rule.create({
         id: item.id,
         options: undefined,
         getCwd: () => cwd,
         getFiles: () => displayPaths,
-        getIndex: () => readIndex(item.id, wantsIndex, index),
+        getArtifact: (id) => readArtifact(id, allowed, artifacts),
         report(violation) {
           report(item, violation);
         },
@@ -290,36 +284,110 @@ function validateProjectMeta(id: string, meta: Record<string, unknown>): void {
   if (requires === undefined) {
     return;
   }
-  if (!Array.isArray(requires) || requires.some((item) => typeof item !== "string")) {
+  if (
+    !Array.isArray(requires) ||
+    requires.some((item) => typeof item !== "string" || item.length === 0)
+  ) {
     throw new ConfigError(
-      `Rule "${id}" has invalid requires; must be an array of known capability names.`,
+      `Rule "${id}" has invalid requires; must be an array of non-empty artifact ids.`,
     );
   }
-  for (const capability of requires) {
-    if (capability !== "index") {
+}
+
+async function buildRequiredArtifacts(
+  plugins: Plugin[],
+  projectRules: Enabled<ProjectRule>[],
+  base: { cwd: string; files: readonly string[]; exclude: readonly string[] },
+): Promise<Map<string, unknown>> {
+  const requiredBy = new Map<string, string[]>();
+  for (const item of projectRules) {
+    for (const id of item.rule.meta.requires ?? []) {
+      const list = requiredBy.get(id) ?? [];
+      list.push(item.id);
+      requiredBy.set(id, list);
+    }
+  }
+  const providers = collectProviders(plugins);
+  const artifacts = new Map<string, unknown>();
+  for (const [id, rules] of requiredBy) {
+    const provider = providers.get(id);
+    if (provider === undefined) {
       throw new ConfigError(
-        `Rule "${id}" has invalid requires value: ${JSON.stringify(capability)}.`,
+        `No plugin provides artifact "${id}" (required by ${rules.join(", ")}).`,
+      );
+    }
+    try {
+      artifacts.set(
+        id,
+        await provider.build({
+          cwd: base.cwd,
+          files: base.files,
+          exclude: base.exclude,
+          requiredBy: rules,
+        }),
+      );
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      if (rules.some((ruleId) => detail.includes(ruleId))) {
+        throw e instanceof ConfigError ? e : new ConfigError(detail);
+      }
+      throw new ConfigError(
+        `Failed to build artifact "${id}" (required by ${rules.join(", ")}): ${detail}`,
       );
     }
   }
+  return artifacts;
 }
 
-function requiresIndex(rule: ProjectRule): boolean {
-  return rule.meta.requires?.includes("index") === true;
+function collectProviders(plugins: Plugin[]): Map<string, ArtifactProvider> {
+  const owners = new Map<string, string>();
+  const providers = new Map<string, ArtifactProvider>();
+  for (const plugin of plugins) {
+    const provides = plugin.provides;
+    if (provides === undefined) {
+      continue;
+    }
+    if (provides === null || typeof provides !== "object" || Array.isArray(provides)) {
+      throw new ConfigError(`Plugin "${plugin.name}" has invalid provides.`);
+    }
+    for (const [id, provider] of Object.entries(provides)) {
+      if (id.length === 0) {
+        throw new ConfigError(`Plugin "${plugin.name}" provides an empty artifact id.`);
+      }
+      if (
+        provider === null ||
+        typeof provider !== "object" ||
+        typeof (provider as ArtifactProvider).build !== "function"
+      ) {
+        throw new ConfigError(`Plugin "${plugin.name}" provides "${id}" without a build function.`);
+      }
+      const existing = owners.get(id);
+      if (existing !== undefined) {
+        throw new ConfigError(
+          `Artifact "${id}" is provided by more than one plugin (${existing}, ${plugin.name}).`,
+        );
+      }
+      owners.set(id, plugin.name);
+      providers.set(id, provider as ArtifactProvider);
+    }
+  }
+  return providers;
 }
 
-function readIndex(
+function readArtifact(
   id: string,
-  wantsIndex: boolean,
-  index: StructuralIndex | undefined,
-): StructuralIndex {
-  if (!wantsIndex) {
-    throw new ConfigError(`getIndex() requires meta.requires: ["index"]`);
+  allowed: ReadonlySet<string>,
+  artifacts: ReadonlyMap<string, unknown>,
+): unknown {
+  if (!allowed.has(id)) {
+    throw new ConfigError(
+      `getArtifact(${JSON.stringify(id)}) requires meta.requires to include ${JSON.stringify(id)}`,
+    );
   }
-  if (index === undefined) {
-    throw new ConfigError(`Index not available (required by ${id}).`);
+  if (!artifacts.has(id)) {
+    throw new ConfigError(`Artifact ${JSON.stringify(id)} is not available.`);
   }
-  return index;
+  return artifacts.get(id);
 }
 
 function mergedExclude(config: UserConfig): string[] {
