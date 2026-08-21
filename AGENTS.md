@@ -43,6 +43,9 @@ Code style and TypeScript hygiene will be enforced by the tool itself as it matu
 - When planning or implementing a PR fix-up, read the latest PR review(s).
 - In `plan` mode: post the plan as a comment on the issue and **stop**. No branch, no commits, no PR — not even a small one, not even if the issue looks trivial or already spells out the solution.
 - Implement only when a comment says `/oc build`. That is the approval; prose asking you to "go ahead" in a plan run is not.
+- Optional `model:<provider>/<id>` in the triggering comment (no space after
+  the colon; first match) overrides the default `xai/grok-4.6`. Invalid
+  tokens fail closed. Issue-open never overrides.
 - A plan states: files touched, the SPECS sections it honours, what gets tested, and what is deliberately out of scope.
 
 PR body: `Closes #<github-issue>`, then what changed, why, and how to verify. The closing reference is load-bearing — CI reads it to attach the PR to Linear and to request review. Nothing else about Linear or reviewers is your job.
