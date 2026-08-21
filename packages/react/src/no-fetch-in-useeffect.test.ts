@@ -34,7 +34,6 @@ async function writeTree(files: Record<string, string>): Promise<string> {
 
 function enabledConfig() {
   return JSON.stringify({
-    languages: ["typescript"],
     plugins: [reactDist],
     rules: { "react/no-fetch-in-useeffect": "error" },
   });

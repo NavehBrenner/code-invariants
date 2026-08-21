@@ -3,6 +3,9 @@
  * copy of that section and must stay in sync with it.
  */
 
+import type { UserConfig } from "./config.ts";
+
+export type { UserConfig };
 export type Severity = "error" | "warn" | "off";
 
 /** Exact string locked in docs/SPECS.md §1. Use only when a rule has nothing to suggest. */
@@ -27,9 +30,9 @@ export interface Violation {
 export type JSONSchema = Record<string, unknown>;
 
 /**
- * Language-specific AST handle produced by a frontend (ts-morph `SourceFile`
- * for TypeScript). The core never narrows this; rules cast it to the type
- * their frontend documents.
+ * Opaque source handle produced by the default TypeScript provider (ts-morph
+ * `SourceFile`). The core never narrows this; plugin rules use `instanceof`
+ * / type guards at use sites.
  */
 export type SourceUnit = unknown;
 
@@ -61,7 +64,7 @@ export interface RuleContext {
    * Artifact built for this run. Only ids listed in `meta.requires`
    * may be requested; others get an exit-2 error.
    */
-  getArtifact(id: string): unknown;
+  getArtifact<Id extends string>(id: Id): Id extends keyof ArtifactMap ? ArtifactMap[Id] : unknown;
 }
 
 /** Input to a plugin `provides` build. Built once per required id per check. */
@@ -90,23 +93,14 @@ export interface Rule {
   create(context: RuleContext): void | RuleListener;
 }
 
-export interface UserConfig {
-  languages: string[];
-  plugins: string[];
-  rules: Record<string, Severity>;
-  include?: string[];
-  exclude?: string[];
-}
-
 export interface Plugin {
   name: string;
   version?: string;
   rules?: Record<string, Rule>;
   /**
-   * Artifact providers merged into the same map as core language seeds.
-   * Duplicate ids (including a plugin colliding with a core-seeded
-   * language provider) fail closed. Engine unions `requires` from enabled
-   * rules, invokes matching providers once, and caches results.
+   * Artifact providers registered into one map with other plugins, then
+   * gap-filled from the default registry. Duplicate ids fail closed.
+   * Ruleless plugins (`name` + `provides`, no `rules`) are shared providers.
    */
   provides?: Record<string, ArtifactProvider>;
   configs?: {
@@ -114,18 +108,12 @@ export interface Plugin {
   };
 }
 
-/** Opaque to core; TS frontend uses ts-morph Project + SourceFiles. */
+/** Opaque to core; default TypeScript provider uses ts-morph Project + SourceFiles. */
 export interface ParsedProject {
   /** Native project handle (ts-morph `Project` for TypeScript). */
   readonly project: unknown;
   /** absolute path → native source unit (ts-morph `SourceFile`). */
   readonly sources: ReadonlyMap<string, SourceUnit>;
-}
-
-export interface LanguageFrontend {
-  readonly language: string;
-  /** Parse all paths once. Same project/sources object is reused for every rule. */
-  parseFiles(absolutePaths: readonly string[]): ParsedProject;
 }
 
 /**

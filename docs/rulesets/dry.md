@@ -3,7 +3,7 @@
 Honest catalog for **`@code-invariants/dry`** (`Plugin.name: "dry"`).  
 This is the implementation list for this plugin. Installing the plugin does **not** enable its rules. `configs.recommended` sets `dry/no-duplicate-functions` to `"error"` for users who opt into that preset.
 
-The plugin **provides** artifact `"dupehound"` (structural fingerprints via [dupehound](https://github.com/Rafaelpta/dupehound)) on the same provider map as core language seeds. Core only orchestrates `requires` → build once → `getArtifact`. We do **not** re-own the fingerprinting algorithm. Embeddings / Slopo-style semantic near-dupes and TypeScript interface/type-shape matching are **not** this plugin.
+The plugin **provides** artifact `"dupehound"` (structural fingerprints via [dupehound](https://github.com/Rafaelpta/dupehound)) on the same provider map as the default registry and other plugins. Core only orchestrates `requires` → build once → `getArtifact`. We do **not** re-own the fingerprinting algorithm. Embeddings / Slopo-style semantic near-dupes and TypeScript interface/type-shape matching are **not** this plugin.
 
 ## Implemented
 

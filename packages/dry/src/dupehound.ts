@@ -2,12 +2,38 @@ import { spawn } from "node:child_process";
 import { accessSync, constants } from "node:fs";
 import { delimiter, isAbsolute, join } from "node:path";
 import type { ArtifactBuildContext } from "code-invariants";
+import { z } from "zod";
 
 export const DUPEHOUND_PIN = "v0.1.2";
 export const DUPEHOUND_ENV = "CODE_INVARIANTS_DUPEHOUND";
 export const SCAN_TIMEOUT_MS = 60_000;
 
-const ACCEPTED_SCHEMA_VERSIONS = new Set([1, 2]);
+const memberSchema = z
+  .object({
+    file: z.string().min(1),
+    name: z.string(),
+    start_line: z.number().finite().optional(),
+    end_line: z.number().finite().optional(),
+    similarity: z.number().finite().optional(),
+    representative: z.boolean().optional(),
+    test: z.boolean().optional(),
+  })
+  .passthrough();
+
+const clusterSchema = z
+  .object({
+    id: z.number().finite().optional(),
+    similarity: z.number().finite().optional(),
+    test_only: z.boolean().optional(),
+    trait_impl_only: z.boolean().optional(),
+    members: z.array(memberSchema),
+  })
+  .passthrough();
+
+const scanReportSchema = z.object({
+  schema_version: z.union([z.literal(1), z.literal(2)]),
+  clusters: z.array(clusterSchema),
+});
 
 export class DupehoundError extends Error {
   constructor(message: string) {
@@ -152,23 +178,53 @@ export function parseScanReport(raw: string): ParsedScanReport {
   } catch {
     throw new DupehoundError("stdout is not JSON");
   }
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new DupehoundError("JSON root must be an object");
-  }
-  const rec = value as Record<string, unknown>;
-  const schemaVersion = rec.schema_version;
-  if (typeof schemaVersion !== "number" || !ACCEPTED_SCHEMA_VERSIONS.has(schemaVersion)) {
-    throw new DupehoundError(
-      `unsupported schema_version ${JSON.stringify(schemaVersion)}; expected 1 or 2`,
-    );
-  }
-  if (!Array.isArray(rec.clusters)) {
-    throw new DupehoundError("missing clusters array");
+  const parsed = scanReportSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new DupehoundError(formatScanError(value, parsed.error));
   }
   return {
-    schemaVersion,
-    clusters: rec.clusters.map((cluster, i) => parseCluster(cluster, i)),
+    schemaVersion: parsed.data.schema_version,
+    clusters: parsed.data.clusters.map((cluster, index) => ({
+      id: cluster.id ?? index + 1,
+      similarity: cluster.similarity ?? 1,
+      testOnly: cluster.test_only === true,
+      traitImplOnly: cluster.trait_impl_only === true,
+      members: cluster.members.map((member) => ({
+        file: member.file,
+        name: member.name,
+        startLine: member.start_line ?? 1,
+        endLine: member.end_line ?? 1,
+        similarity: member.similarity ?? 1,
+        representative: member.representative === true,
+        test: member.test === true,
+      })),
+    })),
   };
+}
+
+function formatScanError(value: unknown, error: z.ZodError): string {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return "JSON root must be an object";
+  }
+  const issues = error.issues;
+  const schemaIssue = issues.find((issue) => issue.path[0] === "schema_version");
+  if (schemaIssue !== undefined && isRecord(value)) {
+    return `unsupported schema_version ${JSON.stringify(value.schema_version)}; expected 1 or 2`;
+  }
+  const clustersIssue = issues.find((issue) => issue.path[0] === "clusters");
+  if (clustersIssue !== undefined && (!isRecord(value) || !Array.isArray(value.clusters))) {
+    return "missing clusters array";
+  }
+  const first = issues[0];
+  if (first === undefined) {
+    return "invalid scan report";
+  }
+  const path = first.path.map(String).join(".");
+  return path.length > 0 ? `${path}: ${first.message}` : first.message;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 export function filterClusters(
@@ -203,47 +259,6 @@ export function filterClusters(
   return out;
 }
 
-function parseCluster(value: unknown, index: number): RawCluster {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new DupehoundError(`clusters[${index}] must be an object`);
-  }
-  const rec = value as Record<string, unknown>;
-  if (!Array.isArray(rec.members)) {
-    throw new DupehoundError(`clusters[${index}] missing members array`);
-  }
-  const members = rec.members.map((member, i) => parseMember(member, index, i));
-  return {
-    id: asFiniteNumber(rec.id, `clusters[${index}].id`, index + 1),
-    similarity: asFiniteNumber(rec.similarity, `clusters[${index}].similarity`, 1),
-    testOnly: rec.test_only === true,
-    traitImplOnly: rec.trait_impl_only === true,
-    members,
-  };
-}
-
-function parseMember(value: unknown, cluster: number, index: number): RawMember {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new DupehoundError(`clusters[${cluster}].members[${index}] must be an object`);
-  }
-  const rec = value as Record<string, unknown>;
-  const prefix = `clusters[${cluster}].members[${index}]`;
-  if (typeof rec.file !== "string" || rec.file.length === 0) {
-    throw new DupehoundError(`${prefix}.file must be a string`);
-  }
-  if (typeof rec.name !== "string") {
-    throw new DupehoundError(`${prefix}.name must be a string`);
-  }
-  return {
-    file: rec.file,
-    name: rec.name,
-    startLine: asFiniteNumber(rec.start_line, `${prefix}.start_line`, 1),
-    endLine: asFiniteNumber(rec.end_line, `${prefix}.end_line`, 1),
-    similarity: asFiniteNumber(rec.similarity, `${prefix}.similarity`, 1),
-    representative: rec.representative === true,
-    test: rec.test === true,
-  };
-}
-
 function toMember(member: RawMember): DupehoundMember {
   return {
     file: normalizeDisplay(member.file),
@@ -253,16 +268,6 @@ function toMember(member: RawMember): DupehoundMember {
     representative: member.representative,
     test: member.test,
   };
-}
-
-function asFiniteNumber(value: unknown, label: string, fallback: number): number {
-  if (value === undefined) {
-    return fallback;
-  }
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new DupehoundError(`${label} must be a number`);
-  }
-  return value;
 }
 
 function normalizeDisplay(file: string): string {

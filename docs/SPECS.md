@@ -21,12 +21,12 @@ These decisions are considered stable unless a major new constraint appears:
    Primary path is a typed `defineConfig` function (TypeScript) that provides IntelliSense, autocomplete, and runtime validation of unknown keys / mismatched rule ids. JSON/YAML remains supported for non-TS projects. Every rule is independently toggleable; installing a plugin does **not** force all of its rules on.
 
 3. **Core language & multi-language strategy**  
-   Core engine, CLI, MCP, and config system are written in **TypeScript**. Language frontends are separate packages that speak a stable, narrow protocol. Rules for a given language are written against that language’s native AST library (ts-morph for TypeScript, libCST/tree-sitter for Python, etc.). The core never imports language-specific AST types directly.
+   Core engine, CLI, MCP, and config system are written in **TypeScript**. Default artifact providers (e.g. `"typescript"`) may parse with language-specific libraries **inside** `build` (ts-morph for TypeScript). Rules consume native AST types via `getArtifact` plus their own imports. **The core never imports language-specific AST types** (`SourceFile` is not on `ArtifactMap`; `ParsedProject.sources` stays `unknown`). There is no public `LanguageFrontend` / `hasFrontend` / `createFrontend` product API.
 
 4. **Plugins**  
    First-class and user-writable. There is one explicit contract (see § Plugin contract). Plugins can be published as npm packages or loaded from local paths. Agent skills for creating and maintaining plugins are part of the deliverable.  
    **v1 plugin language is TypeScript only.** Plugins are TypeScript/JavaScript packages that export the `Plugin` interface. Python-written plugins may be supported later via the same protocol once a Python frontend exists.  
-    **Core has no built-in rule bag.** Every check is a plugin rule. Core is the engine, language frontends, config/CLI, and a generic artifact seam — not a default catalog and **not** a dupehound (or other niche binary) host. Baseline TypeScript rules live in `@code-invariants/typescript` (`Plugin.name: "ts"`). React compositional rules live in `@code-invariants/react` (`Plugin.name: "react"`). Structural DRY lives in `@code-invariants/dry` (`Plugin.name: "dry"`), which **provides** the `dupehound` artifact. A plugin may ship `configs.recommended`; installing a plugin does **not** enable its rules (locked #2).
+    **Core has no built-in rule bag.** Every check is a plugin rule. Core is the engine, default artifact providers, config/CLI, and a generic artifact seam — not a default catalog and **not** a dupehound (or other niche binary) host. Baseline TypeScript rules live in `@code-invariants/typescript` (`Plugin.name: "ts"`). React compositional rules live in `@code-invariants/react` (`Plugin.name: "react"`). Structural DRY lives in `@code-invariants/dry` (`Plugin.name: "dry"`), which **provides** the `dupehound` artifact. Shared/provider-only packages load as **ruleless plugins** (`name` + `provides`, no `rules`) via `plugins[]`. A plugin may ship `configs.recommended`; installing a plugin does **not** enable its rules (locked #2).
 
 5. **Runtime helpers**  
    Optional companion packages (e.g. a future official `DataRegion`). Static rules work both with the official helpers and with equivalent structural patterns the user already has. **Helpers are optional; this WP ships none.** TanStack Query detectors live under `@code-invariants/react`, not a separate package.
@@ -48,15 +48,13 @@ These decisions are considered stable unless a major new constraint appears:
    **Overlap family:** `import-boundary` / layers / no-import-from / no-deep-import / max-relative-depth are one policy family. The v1 TypeScript plugin catalogs **none** of them unless a future WP proves a unique agent-facing gap. Prefer configuring Biome + dependency-cruiser over reimplementation.
 
 8. **One provider map / one engine loop**  
-   No unified cross-language AST. Same product idea on two languages ⇒ **two rules** (convention, not `meta.kind`), each `requires` that language’s artifact id. There is a single `Rule` / `RuleContext`. Optional `meta.requires: string[]` names artifacts. Language AST id = language name (`"typescript"` → today’s `ParsedProject`). In-repo / TypeScript plugin authors use `defineRule` so `getArtifact(id)` is typed from `ArtifactMap` (no `as ParsedProject` / `as DupehoundIndex`). Runtime `getArtifact(id: string): unknown` stays for dynamic `import()`.
+   No unified cross-language AST. Same product idea on two languages ⇒ **two rules** (convention, not `meta.kind`), each `requires` that artifact id. There is a single `Rule` / `RuleContext`. Optional `meta.requires: string[]` names artifacts. In-repo / TypeScript plugin authors use `defineRule` (identity) so `getArtifact(id)` is typed from `ArtifactMap` (no `as ParsedProject` / `as DupehoundIndex`). Runtime engine `getArtifact` stays untyped at the `Map<string, unknown>` boundary.
 
-   **Who provides:** one map. Core **seeds default providers** from frontends (`"typescript"` → `ParsedProject` wrapped as `ArtifactProvider.build`). Plugins add `provides` the same way (`dupehound` stays in `@code-invariants/dry`). Packaging (who registers) is not a second build path. Duplicate provider id (core already registered `typescript`, plugin `provides.typescript`) → exit 2, no override; message names both owners (`core` + plugin name). There is **no** reserved-id category: a plugin *may* `provides.python` if core did not seed `python`.
+   **Who provides:** one map. Start empty → register every `provides` entry from loaded **plugin modules** (collision → exit 2, names **both owners**) → for each id in the **default registry** still missing, fill with `owner: "default"`. Defaults only fill gaps; they never replace a plugin-provided id. A plugin `provides.typescript` **wins** (default skipped for that id). v1 default registry is `as const` with `"typescript"` → today’s `ParsedProject`. `dupehound` stays in `@code-invariants/dry`. Multi-team shared providers load as **ruleless plugins** via `plugins[]`. There is **no** `config.languages` and **no** reserved-id category.
 
-   **Engine:** collect all providers into one map → union `requires` from enabled rules → **build each id once** (`await provider.build(context)`) → `create` every rule once with the same context. One include/exclude file pass; extension filtering lives **inside** the typescript provider’s `build` (`.ts`/`.tsx`/`.mts`/`.cts`). Empty sources after filter is success, not an error. `LanguageFrontend` stays the parse protocol behind the core typescript provider (locked #3) — do not collapse it into `ArtifactProvider`.
+   **Engine:** collect all providers into one map → union `requires` from enabled rules → **build each id once** (`await provider.build(context)`) → `create` every rule once with the same context. One include/exclude file pass; extension filtering lives **inside** the typescript provider’s `build` (`.ts`/`.tsx`/`.mts`/`.cts`). Empty sources after filter is success, not an error.
 
-   **`config.languages`:** allowlist/policy **only** when the required id is a **core-seeded language provider**. `requires: ["typescript"]` with `languages: ["python"]` → allowlist error (typescript *is* seeded). No frontend for an id (e.g. `python`) → nothing seeded → **missing provider**.
-
-   **Fail closed (exit 2, name rule ids):** invalid `requires`; core-seeded language id not in `config.languages`; missing provider; duplicate provider id; build throw; `getArtifact` for an id not in that rule’s `requires`. Do not silently skip.
+   **Fail closed (exit 2, name rule ids):** invalid `requires`; missing provider (provider-neutral copy, not “No plugin provides…”); duplicate provider id; build throw; `getArtifact` for an id not in that rule’s `requires`. Do not silently skip.
 
    Not a vector store. `code-invariants index` CLI stays unimplemented. Dupehound (structural fingerprints / winnowing, **not** embeddings) is provided by `@code-invariants/dry` as artifact id `"dupehound"`.
 
@@ -65,7 +63,7 @@ These decisions are considered stable unless a major new constraint appears:
 9. **Performance approach**  
    TypeScript core is the deliberate starting point for velocity and for a TypeScript-native plugin ecosystem. Performance is treated as a hard constraint:
    - Default CI mode should be incremental (`--diff` / changed files only).
-   - Cache the language frontend’s project/AST state across runs where possible.
+    - Cache the default TypeScript provider’s project/AST state across runs where possible.
    - Avoid naïve full-project type-aware analysis on every invocation.
    - Measure real wall-clock time on representative monorepos early.
    - Only if measured numbers are unacceptable: extract hot paths (parsing, simple structural walks) into a native (Rust/oxc) addon while keeping the rule-authoring surface in TypeScript.  
@@ -84,14 +82,14 @@ These decisions are considered stable unless a major new constraint appears:
 ┌────────────────────────────▼────────────────────────────────┐
 │                     Rule Engine (core)                      │
 │  - loads plugins                                            │
-│  - one provider map (core language seeds + plugin provides) │
+│  - one provider map (plugin provides, then default gaps)    │
 │  - unions requires; builds each artifact once               │
 │  - one create() loop; collects violations                   │
 └────────────────────────────┬────────────────────────────────┘
                              │
               ┌──────────────▼──────────────┐
               │   Artifact providers        │
-              │   core: "typescript" →      │
+              │   default: "typescript" →   │
               │     ParsedProject           │
               │   dry: "dupehound"          │
               │   embeddings later          │
@@ -107,9 +105,8 @@ These decisions are considered stable unless a major new constraint appears:
   `NO_SUGGESTION = "No suggestion available for this rule."`
 
   Product rules in this repo (`ts/public-exports-tested`, `react/no-fetch-in-useeffect`, `react/query-error-handled`, `dry/no-duplicate-functions`) **must** use concrete suggestions, not the sentinel. CLI prints a `suggestion:` line unless the value is exactly `NO_SUGGESTION`. `report()` fills the sentinel at runtime if the field is missing (JS plugins keep working).
-- **Frontend**: Language-specific AST / symbol provider that implements the frontend protocol.
-- **Plugin**: A package that exports one or more rules (and optionally recommended configs and `provides` artifact builders) conforming to the plugin contract.
-- **Artifact**: Opaque value built once per check when an enabled rule `requires` its id. One provider map: core seeds language defaults (`"typescript"` → `ParsedProject`); plugins add `provides` (`"dupehound"` in `@code-invariants/dry`). Vector / embedding index is still future.
+- **Plugin**: A package that exports `name` plus optional `rules` and/or `provides`. Ruleless plugins (`name` + `provides` only) are shared providers.
+- **Artifact**: Opaque value built once per check when an enabled rule `requires` its id. One provider map: plugin `provides` first, then default registry gap-fill (`"typescript"` → `ParsedProject`; `"dupehound"` in `@code-invariants/dry`). Vector / embedding index is still future.
 
 ## 2. Plugin contract (explicit)
 
@@ -139,7 +136,7 @@ export interface ArtifactBuildContext {
 
 export interface Rule {
   meta: {
-    requires?: string[];        // artifact ids; language AST id = language name
+    requires?: string[];        // artifact ids
     docs: { description: string; url?: string };
     schema?: JSONSchema;
     fixable?: "code" | "whitespace";
@@ -153,16 +150,10 @@ export interface RuleContext {
   report(violation: Omit<Violation, "ruleId">): void;
   getCwd(): string;
   getFiles(): readonly string[]; // one include/exclude pass, display paths
-  getArtifact(id: string): unknown; // only if meta.requires includes id
+  getArtifact<Id extends string>(id: Id): Id extends keyof ArtifactMap ? ArtifactMap[Id] : unknown;
 }
 
-export interface LanguageFrontend {
-  readonly language: string;
-  /** Parse all paths once. Same project/sources object is reused for every rule. */
-  parseFiles(absolutePaths: readonly string[]): ParsedProject;
-}
-
-/** Opaque to core; TS frontend uses ts-morph Project + SourceFiles. */
+/** Opaque to core; default TypeScript provider uses ts-morph Project + SourceFiles. */
 export interface ParsedProject {
   readonly project: unknown;
   readonly sources: ReadonlyMap<string, SourceUnit>;
@@ -173,21 +164,12 @@ export interface ArtifactMap {
   typescript: ParsedProject;
 }
 
-export function defineRule<
-  const Requires extends readonly (keyof ArtifactMap)[] = readonly [],
->(rule: {
-  meta: Omit<RuleMeta, "requires"> & { requires?: Requires };
-  create(
-    context: Omit<RuleContext, "getArtifact"> & {
-      getArtifact<Id extends Requires[number]>(id: Id): ArtifactMap[Id];
-    },
-  ): void | RuleListener;
-}): Rule;
+export function defineRule<T extends Rule>(rule: T): T;
 ```
 
-`create` is invoked once per enabled rule, not once per file. Rules never touch the filesystem or the CLI; they only receive their context and call `context.report`. Language consumers: `requires: ["typescript"]` and `getArtifact("typescript")` (typed as `ParsedProject` via `defineRule`; `.project` / `.sources`). Keep `as SourceFile` (`SourceUnit` stays `unknown` — locked #3). A plugin `provides.build` function **may** spawn tools; rules must not. Duplicate provider id (core already registered `typescript`) fails closed — not a reserved-id category. This keeps rules testable and isolatable.
+`create` is invoked once per enabled rule, not once per file. Rules never touch the filesystem or the CLI; they only receive their context and call `context.report`. TypeScript consumers: `requires: ["typescript"]` and `getArtifact("typescript")` (typed as `ParsedProject` via `ArtifactMap`; `.project` / `.sources`). Core `ParsedProject.sources` stays `unknown`; plugins kill `as SourceFile` with `instanceof` / type guards (locked #3). A plugin `provides.build` function **may** spawn tools; rules must not. Duplicate artifact id fails closed (both owners named). Defaults only fill gaps — a plugin `provides.typescript` wins. This keeps rules testable and isolatable.
 
-Invalid `requires`, a core-seeded language id not in `config.languages`, a missing provider, a duplicate provider id, a build throw, or `getArtifact` for an id not in that rule’s `requires` is an error (exit 2; do not silently skip). The message names the rule id(s). No frontend for an id (e.g. `python`) is a missing provider.
+Invalid `requires`, a missing provider, a duplicate provider id, a build throw, or `getArtifact` for an id not in that rule’s `requires` is an error (exit 2; do not silently skip). Missing-provider copy is provider-neutral (`No provider for artifact "…" (required by …).`). The message names the rule id(s).
 
 A custom plugin is simply an npm package (or local folder) that exports a `Plugin`. The core discovers it from the `plugins` array in the user’s config. Core never ships a default rule table; a rule exists only if a loaded plugin lists it. Installing `@code-invariants/typescript` (or any plugin) does not enable rules until they appear in `config.rules`. `configs.recommended` is an optional preset the user copies in — the engine does not apply it on install.
 
@@ -280,7 +262,7 @@ Implemented in `@code-invariants/typescript` as **`ts/public-exports-tested`**.
 | Skip | Type-only (`export type`, `export interface`, `export { type X }`). `export *` / `export * as ns`. `export =`. Ambient `.d.ts`. Exports in test paths. |
 | Test path (not configurable in v1) | File is in the TypeScript artifact, and basename matches `*.test.*` / `*.spec.*`, or a path segment is `__tests__`. |
 | Reference | Test-file import whose specifier **resolves relatively** (`.ts` / `.tsx` / `.mts` / `.cts` + `index`) to the exporting file in `getArtifact("typescript").sources`, and the import binds that export name (named) or is a default import (`default`). `import *` does not satisfy named exports. Bare specifiers / dynamic `import()` do not count in v1. |
-| Barrel + source | If both `impl.ts` (`export const x`) and `barrel.ts` (`export { x } from "./impl"`) are in the language set, a test import from the barrel satisfies **only** the barrel export, not impl’s own public export. Each public surface needs its own test reference. |
+   | Barrel + source | If both `impl.ts` (`export const x`) and `barrel.ts` (`export { x } from "./impl"`) are in `getArtifact("typescript").sources`, a test import from the barrel satisfies **only** the barrel export, not impl’s own public export. Each public surface needs its own test reference. |
 | Scope | Include/exclude only. No index. **Tests must not be excluded** or every export fails. This rule only sees files in the TypeScript artifact; a default/global `exclude` of `**/*.test.*` / `**/*.spec.*` wipes the reference sources. Production excludes (`**/generated/**`, `**/dist/**`) are fine. Recommended and example configs keep tests in the set. |
 | Violation | `ruleId` `ts/public-exports-tested`; location on the export; message names the export and file; suggestion: import it from a test. |
 | Recommended | `configs.recommended.rules["ts/public-exports-tested"] = "error"`. Install does **not** apply recommended (locked #2 / #4). |
@@ -348,7 +330,6 @@ code-invariants report
 import { defineConfig } from "code-invariants";
 
 export default defineConfig({
-  languages: ["typescript"],
   plugins: [
     "@code-invariants/typescript",
     "@code-invariants/react",

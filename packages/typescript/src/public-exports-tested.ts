@@ -1,6 +1,6 @@
 import { dirname, extname, join, resolve } from "node:path";
 import { defineRule, type Range, type RuleContext } from "code-invariants";
-import { type ExportDeclaration, Node, type SourceFile, SyntaxKind } from "ts-morph";
+import { type ExportDeclaration, Node, SourceFile, SyntaxKind } from "ts-morph";
 
 const TS_EXTS = [".ts", ".tsx", ".mts", ".cts"] as const;
 const SWAP_EXTS = new Set([".js", ".jsx", ".mjs", ".cjs", ...TS_EXTS]);
@@ -28,15 +28,14 @@ export const publicExportsTested = defineRule({
     const exported: PublicExport[] = [];
 
     for (const [abs, unit] of sources) {
-      if (isDeclarationFile(abs)) {
+      if (isDeclarationFile(abs) || !isSourceFile(unit)) {
         continue;
       }
-      const sf = unit as SourceFile;
       if (isTestPath(abs)) {
-        collectReferences(sf, abs, sources, referenced);
+        collectReferences(unit, abs, sources, referenced);
       } else {
         const display = displayByAbs.get(abs) ?? posix(abs);
-        exported.push(...collectPublicExports(sf, abs, display));
+        exported.push(...collectPublicExports(unit, abs, display));
       }
     }
 
@@ -56,6 +55,10 @@ export const publicExportsTested = defineRule({
     }
   },
 });
+
+function isSourceFile(value: unknown): value is SourceFile {
+  return value instanceof SourceFile;
+}
 
 function isTestPath(filePath: string): boolean {
   const normalized = posix(filePath);

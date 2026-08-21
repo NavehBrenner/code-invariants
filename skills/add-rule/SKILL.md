@@ -18,10 +18,10 @@ Add **one** rule to an existing plugin, with fixtures and tests.
 
 1. Confirm the rule belongs in this plugin (language baseline vs framework vs architecture). Do **not** add import-boundary / layers / no-deep-import / cycle / path-ban rules to `@code-invariants/typescript` (SPECS locked #7). Do **not** add token/class allowlists to `@code-invariants/react` (R3 → tailwind/DS). Do not implement backlog rows from [docs/rulesets/react.md](../../docs/rulesets/react.md) unless the task asks for that rule.
   2. Implement a single `Rule` / `RuleContext` (no `meta.kind`) with **`defineRule`**:
-    - Optional `meta.requires` as a const tuple of known artifact ids (language AST id = language name, e.g. `["typescript"]`; dry: `["dupehound"]`)
-    - `create` uses `id` / `options` / `report` / `getCwd` / `getFiles` / `getArtifact(id)` — `getArtifact` returns the typed `ArtifactMap` value (no `as ParsedProject` / `as DupehoundIndex`). Keep `as SourceFile`. Only ids in `requires`; else exit 2
-    - Same idea on two languages ⇒ two rules (convention, not `meta.kind`); each requires that language’s artifact
-    - Do **not** spawn CLIs from the rule. A plugin `provides.build` **may** spawn tools. Duplicate provider id (including a plugin colliding with a core-seeded language provider) → exit 2; there is no reserved-id category
+    - Optional `meta.requires` as a const tuple of known artifact ids (e.g. `["typescript"]`; dry: `["dupehound"]`)
+    - `create` uses `id` / `options` / `report` / `getCwd` / `getFiles` / `getArtifact(id)` — `getArtifact` returns the typed `ArtifactMap` value (no `as ParsedProject` / `as DupehoundIndex`). Narrow `SourceFile` with `instanceof` / type guards, not `as SourceFile`. Only ids in `requires`; else exit 2
+    - Same idea on two languages ⇒ two rules (convention, not `meta.kind`); each requires that artifact
+    - Do **not** spawn CLIs from the rule. A plugin `provides.build` **may** spawn tools. Duplicate artifact ids fail closed (both owners named). Defaults only fill gaps — a plugin may `provides.typescript`. Shared providers register as ruleless plugins (`name` + `provides`, no `rules`) via `plugins[]`
     - Prefer **verbose names** (`artifacts`, not `arts`; `artifactBuildContext`, not `abc`). Shorthands only if the full name would make a variable/function identifier **longer than 20 characters**. If a shorthand is used under that rule, put a **comment line immediately above the declaration** with the full verbose intended name
     - `meta.docs.description` (and url if docs exist)
     - No filesystem or CLI side channels from the rule

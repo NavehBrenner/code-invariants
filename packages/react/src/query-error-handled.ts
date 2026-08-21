@@ -1,5 +1,5 @@
 import { defineRule, type RuleContext } from "code-invariants";
-import { Node, type SourceFile } from "ts-morph";
+import { Node, SourceFile } from "ts-morph";
 import {
   collectQueryHookBindings,
   enclosingFunction,
@@ -28,10 +28,16 @@ export const queryErrorHandled = defineRule({
   create(context) {
     const parsed = context.getArtifact("typescript");
     for (const [abs, unit] of parsed.sources) {
-      scanFile(unit as SourceFile, abs, context);
+      if (isSourceFile(unit)) {
+        scanFile(unit, abs, context);
+      }
     }
   },
 });
+
+function isSourceFile(value: unknown): value is SourceFile {
+  return value instanceof SourceFile;
+}
 
 function scanFile(sf: SourceFile, file: string, context: Pick<RuleContext, "report">): void {
   const { hooks, namespaces } = collectQueryHookBindings(sf);

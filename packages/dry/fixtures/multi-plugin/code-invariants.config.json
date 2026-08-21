@@ -1,5 +1,4 @@
 {
-  "languages": ["typescript"],
   "plugins": [
     "../../../typescript/dist/index.js",
     "../../../react/dist/index.js",

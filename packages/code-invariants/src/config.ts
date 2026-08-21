@@ -1,11 +1,22 @@
 import { access, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { Severity, UserConfig } from "./index.ts";
+import { z } from "zod";
 
-const ALLOWED_KEYS = ["languages", "plugins", "rules", "include", "exclude"] as const;
+const ALLOWED_KEYS = ["plugins", "rules", "include", "exclude"] as const;
 const ALLOWED_KEY_SET = new Set<string>(ALLOWED_KEYS);
-const SEVERITIES = new Set<Severity>(["error", "warn", "off"]);
+const severitySchema = z.enum(["error", "warn", "off"]);
+
+export const userConfigSchema = z
+  .object({
+    plugins: z.array(z.string()),
+    rules: z.record(z.string(), severitySchema),
+    include: z.array(z.string()).optional(),
+    exclude: z.array(z.string()).optional(),
+  })
+  .strict();
+
+export type UserConfig = z.infer<typeof userConfigSchema>;
 
 export const CONFIG_FILENAMES = [
   "code-invariants.config.ts",
@@ -28,30 +39,11 @@ export function defineConfig(config: UserConfig): UserConfig {
 }
 
 export function validateConfig(raw: unknown): UserConfig {
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
-    throw new ConfigError("Config must be an object");
+  const result = userConfigSchema.safeParse(raw);
+  if (result.success) {
+    return result.data;
   }
-  const rec = raw as Record<string, unknown>;
-  const unknown = Object.keys(rec).filter((key) => !ALLOWED_KEY_SET.has(key));
-  if (unknown.length > 0) {
-    throw new ConfigError(
-      `Unknown config key${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")}. Allowed keys: ${ALLOWED_KEYS.join(", ")}.`,
-    );
-  }
-  if (!("languages" in rec) || !("plugins" in rec) || !("rules" in rec)) {
-    throw new ConfigError('Config must include "languages", "plugins", and "rules"');
-  }
-  const languages = assertStringArray(rec.languages, "languages");
-  const plugins = assertStringArray(rec.plugins, "plugins");
-  const rules = assertRules(rec.rules);
-  const config: UserConfig = { languages, plugins, rules };
-  if ("include" in rec) {
-    config.include = assertStringArray(rec.include, "include");
-  }
-  if ("exclude" in rec) {
-    config.exclude = assertStringArray(rec.exclude, "exclude");
-  }
-  return config;
+  throw mapConfigZodError(raw, result.error);
 }
 
 export async function findConfigPath(cwd: string): Promise<string | undefined> {
@@ -98,39 +90,87 @@ export async function readConfigFile(path: string): Promise<UserConfig> {
     }
     return validateConfig(parsed);
   }
-  let mod: Record<string, unknown>;
+  let loaded: unknown;
   try {
-    mod = (await import(pathToFileURL(path).href)) as Record<string, unknown>;
+    loaded = await import(pathToFileURL(path).href);
   } catch (e) {
     throw new ConfigError(`Failed to load ${path}: ${messageOf(e)}`);
   }
-  if (!("default" in mod)) {
+  if (!isRecord(loaded) || !("default" in loaded)) {
     throw new ConfigError(`${path} must have a default export`);
   }
-  return validateConfig(mod.default);
+  return validateConfig(loaded.default);
 }
 
-function assertStringArray(value: unknown, key: string): string[] {
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
-    throw new ConfigError(`"${key}" must be an array of strings`);
+function mapConfigZodError(raw: unknown, error: z.ZodError): ConfigError {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return new ConfigError("Config must be an object");
   }
-  return value;
-}
 
-function assertRules(value: unknown): Record<string, Severity> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new ConfigError('"rules" must be an object of rule ids to "error" | "warn" | "off"');
+  const extraKeys = isRecord(raw)
+    ? Object.keys(raw).filter((key) => !ALLOWED_KEY_SET.has(key))
+    : [];
+  if (extraKeys.length > 0) {
+    return new ConfigError(
+      `Unknown config key${extraKeys.length > 1 ? "s" : ""}: ${extraKeys.join(", ")}. Allowed keys: ${ALLOWED_KEYS.join(", ")}.`,
+    );
   }
-  const rules: Record<string, Severity> = {};
-  for (const [id, severity] of Object.entries(value as Record<string, unknown>)) {
-    if (typeof severity !== "string" || !SEVERITIES.has(severity as Severity)) {
-      throw new ConfigError(
-        `Invalid severity for "${id}": ${JSON.stringify(severity)}. Use "error", "warn", or "off".`,
-      );
+
+  const issues = error.issues;
+  const missingRequired = issues.some((issue) => {
+    const key = issue.path[0];
+    return (key === "plugins" || key === "rules") && isMissingIssue(issue);
+  });
+  if (missingRequired) {
+    return new ConfigError('Config must include "plugins" and "rules"');
+  }
+
+  for (const issue of issues) {
+    const key = issue.path[0];
+    if (key === "plugins" || key === "include" || key === "exclude") {
+      return new ConfigError(`"${String(key)}" must be an array of strings`);
     }
-    rules[id] = severity as Severity;
+    if (key === "rules") {
+      if (issue.path.length === 1) {
+        return new ConfigError('"rules" must be an object of rule ids to "error" | "warn" | "off"');
+      }
+      const id = issue.path[1];
+      if (typeof id === "string") {
+        const received = valueAt(raw, issue.path);
+        return new ConfigError(
+          `Invalid severity for "${id}": ${JSON.stringify(received)}. Use "error", "warn", or "off".`,
+        );
+      }
+    }
   }
-  return rules;
+
+  const first = issues[0];
+  return new ConfigError(first?.message ?? "Invalid config");
+}
+
+function isMissingIssue(issue: z.ZodIssue): boolean {
+  if (issue.code !== "invalid_type") {
+    return false;
+  }
+  if (!isRecord(issue)) {
+    return false;
+  }
+  return issue.received === "undefined" || issue.input === undefined;
+}
+
+function valueAt(raw: unknown, path: PropertyKey[]): unknown {
+  let current: unknown = raw;
+  for (const key of path) {
+    if (!isRecord(current)) {
+      return current;
+    }
+    current = current[String(key)];
+  }
+  return current;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function messageOf(e: unknown): string {

@@ -6,7 +6,7 @@ import { defineConfig, findConfigPath, loadConfig, validateConfig } from "./conf
 import type { UserConfig } from "./index.ts";
 import { defineConfig as exportedDefineConfig } from "./index.ts";
 
-const valid: UserConfig = { languages: ["typescript"], plugins: [], rules: {} };
+const valid: UserConfig = { plugins: [], rules: {} };
 
 async function writeTree(files: Record<string, string>): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "ci-config-"));
@@ -24,8 +24,14 @@ test("defineConfig is exported and returns the validated config", () => {
 });
 
 test("defineConfig rejects unknown keys", () => {
-  expect(() => defineConfig({ ...valid, architecture: {} } as UserConfig)).toThrow(
+  expect(() => validateConfig({ ...valid, architecture: {} })).toThrow(
     /Unknown config key: architecture/,
+  );
+});
+
+test("defineConfig rejects languages", () => {
+  expect(() => validateConfig({ ...valid, languages: ["typescript"] })).toThrow(
+    /Unknown config key: languages/,
   );
 });
 
@@ -35,21 +41,28 @@ test("defineConfig rejects invalid severity", () => {
   ).toThrow(/Invalid severity for "ts\/public-exports-tested"/);
 });
 
-test("defineConfig requires languages, plugins, and rules", () => {
-  expect(() => validateConfig({})).toThrow(/must include "languages", "plugins", and "rules"/);
+test("defineConfig requires plugins and rules", () => {
+  expect(() => validateConfig({})).toThrow(/must include "plugins" and "rules"/);
+  expect(() => validateConfig({ plugins: [] })).toThrow(/must include "plugins" and "rules"/);
+  expect(() => validateConfig({ rules: {} })).toThrow(/must include "plugins" and "rules"/);
+});
+
+test("defineConfig accepts config without languages", () => {
+  expect(validateConfig({ plugins: ["./plugin"], rules: { "demo/ping": "error" } })).toEqual({
+    plugins: ["./plugin"],
+    rules: { "demo/ping": "error" },
+  });
 });
 
 test("loadConfig reads a JSON config", async () => {
   const dir = await writeTree({
     "code-invariants.config.json": JSON.stringify({
-      languages: ["typescript"],
       plugins: ["./plugin"],
       rules: { "demo/ping": "error" },
     }),
   });
   const loaded = await loadConfig(dir);
   expect(loaded?.config).toEqual({
-    languages: ["typescript"],
     plugins: ["./plugin"],
     rules: { "demo/ping": "error" },
   });
@@ -59,7 +72,6 @@ test("loadConfig reads a JSON config", async () => {
 test("loadConfig reads a JS config default export", async () => {
   const dir = await writeTree({
     "code-invariants.config.mjs": `export default {
-      languages: ["typescript"],
       plugins: [],
       rules: { "demo/off": "off" },
     };
@@ -72,7 +84,6 @@ test("loadConfig reads a JS config default export", async () => {
 test("loadConfig reads a TypeScript config default export", async () => {
   const dir = await writeTree({
     "code-invariants.config.ts": `export default {
-      languages: ["typescript"] as string[],
       plugins: [] as string[],
       rules: {},
     };

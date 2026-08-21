@@ -63,7 +63,6 @@ test("multi-plugin run attributes ts/ and react/ violations with suggestions", a
 test("unknown rule id with react plugin loaded exits 2 naming the id", async () => {
   const dir = await writeTree({
     "code-invariants.config.json": JSON.stringify({
-      languages: ["typescript"],
       plugins: [reactDist],
       rules: { "react/no-such-rule": "error" },
     }),
@@ -77,7 +76,6 @@ test("unknown rule id with react plugin loaded exits 2 naming the id", async () 
 test("loading both plugins without enabling rules is an empty path", async () => {
   const dir = await writeTree({
     "code-invariants.config.json": JSON.stringify({
-      languages: ["typescript"],
       plugins: [tsDist, reactDist],
       rules: {},
     }),

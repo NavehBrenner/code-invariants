@@ -172,7 +172,6 @@ This family overlaps dependency-cruiser, eslint-plugin-boundaries, ArchUnit, She
 
 ```ts
 export default defineConfig({
-  languages: ["typescript"],
   plugins: ["@code-invariants/typescript"],
   architecture: {
     // Modules = units with a public API
@@ -267,7 +266,6 @@ Users enable via:
 
 ```ts
 export default defineConfig({
-  languages: ["typescript"],
   plugins: ["@code-invariants/typescript"],
   rules: {
     ...typescriptRecommended,

@@ -207,7 +207,6 @@ async function writeTree(files: Record<string, string>): Promise<string> {
 
 function config(rules: Record<string, string>, extra: Record<string, unknown> = {}) {
   return JSON.stringify({
-    languages: ["typescript"],
     plugins: ["./plugin.mjs"],
     rules,
     ...extra,
@@ -217,7 +216,6 @@ function config(rules: Record<string, string>, extra: Record<string, unknown> = 
 test("unknown rule id exits 2", async () => {
   const dir = await writeTree({
     "code-invariants.config.json": JSON.stringify({
-      languages: ["typescript"],
       plugins: [],
       rules: { "react/data-region-exhaustive": "error" },
     }),
@@ -371,35 +369,15 @@ test("language provider skips non-TS paths", async () => {
   expect(lines.join("\n")).not.toMatch(/expected 1 TS source/);
 });
 
-test("requires typescript when not in config.languages exits 2", async () => {
-  const dir = await writeTree({
-    "plugin.mjs": pluginWith(`{ requires: ["typescript"], docs: { description: "needs ts" } }`),
-    "code-invariants.config.json": JSON.stringify({
-      languages: ["python"],
-      plugins: ["./plugin.mjs"],
-      rules: { "fixture/ping": "error" },
-    }),
-    "src/hello.ts": "export const n = 1;\n",
-  });
-  const errors: string[] = [];
-  expect(await check(dir, silent, (m) => errors.push(String(m)))).toBe(2);
-  expect(errors.join("\n")).toMatch(/Artifact "typescript" is not in config\.languages/);
-  expect(errors.join("\n")).toMatch(/fixture\/ping/);
-});
-
-test("requires python with no frontend exits 2 as missing provider", async () => {
+test("requires python with no provider exits 2", async () => {
   const dir = await writeTree({
     "plugin.mjs": pluginWith(`{ requires: ["python"], docs: { description: "needs python" } }`),
-    "code-invariants.config.json": JSON.stringify({
-      languages: ["python"],
-      plugins: ["./plugin.mjs"],
-      rules: { "fixture/ping": "error" },
-    }),
+    "code-invariants.config.json": config({ "fixture/ping": "error" }),
     "src/hello.ts": "export const n = 1;\n",
   });
   const errors: string[] = [];
   expect(await check(dir, silent, (m) => errors.push(String(m)))).toBe(2);
-  expect(errors.join("\n")).toMatch(/No plugin provides artifact "python"/);
+  expect(errors.join("\n")).toMatch(/No provider for artifact "python"/);
   expect(errors.join("\n")).toMatch(/fixture\/ping/);
   expect(errors.join("\n")).not.toMatch(/No frontend/);
   expect(errors.join("\n")).not.toMatch(/reserved/);
@@ -482,7 +460,7 @@ test("missing provider exits 2 and names the rule", async () => {
   });
   const errors: string[] = [];
   expect(await check(dir, silent, (m) => errors.push(String(m)))).toBe(2);
-  expect(errors.join("\n")).toMatch(/No plugin provides artifact "ghost"/);
+  expect(errors.join("\n")).toMatch(/No provider for artifact "ghost"/);
   expect(errors.join("\n")).toMatch(/fixture\/ping/);
 });
 
@@ -534,7 +512,6 @@ test("duplicate artifact id exits 2", async () => {
 };
 `,
     "code-invariants.config.json": JSON.stringify({
-      languages: ["typescript"],
       plugins: ["./plugin.mjs", "./other.mjs"],
       rules: { "fixture/ping": "error" },
     }),
@@ -543,17 +520,35 @@ test("duplicate artifact id exits 2", async () => {
   const errors: string[] = [];
   expect(await check(dir, silent, (m) => errors.push(String(m)))).toBe(2);
   expect(errors.join("\n")).toMatch(/Artifact "fake" is provided by more than one owner/);
+  expect(errors.join("\n")).toMatch(/fixture/);
+  expect(errors.join("\n")).toMatch(/other/);
 });
 
-test("plugin provides.typescript while core seeded it exits 2 as duplicate", async () => {
+test("plugin provides.typescript overrides the default provider", async () => {
   const dir = await writeTree({
     "plugin.mjs": `export default {
   name: "fixture",
-  provides: { typescript: { build() { return {}; } } },
+  provides: {
+    typescript: {
+      build() {
+        return { project: "plugin", sources: new Map() };
+      },
+    },
+  },
   rules: {
     ping: {
       meta: { requires: ["typescript"], docs: { description: "needs ts" } },
-      create() {},
+      create(context) {
+        const parsed = context.getArtifact("typescript");
+        if (parsed.project !== "plugin") {
+          context.report({
+            severity: "error",
+            file: context.getFiles()[0],
+            range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
+            message: "default provider was used",
+          });
+        }
+      },
     },
   },
 };
@@ -561,12 +556,77 @@ test("plugin provides.typescript while core seeded it exits 2 as duplicate", asy
     "code-invariants.config.json": config({ "fixture/ping": "error" }),
     "src/hello.ts": "export const n = 1;\n",
   });
+  const lines: string[] = [];
   const errors: string[] = [];
-  expect(await check(dir, silent, (m) => errors.push(String(m)))).toBe(2);
-  expect(errors.join("\n")).toMatch(
-    /Artifact "typescript" is provided by more than one owner \(core, fixture\)/,
-  );
-  expect(errors.join("\n")).not.toMatch(/reserved/);
+  expect(
+    await check(
+      dir,
+      (m) => lines.push(String(m)),
+      (m) => errors.push(String(m)),
+    ),
+  ).toBe(0);
+  expect(lines.join("\n")).not.toMatch(/default provider was used/);
+  expect(errors.join("\n")).not.toMatch(/more than one owner/);
+});
+
+test("ruleless plugin provides an artifact another plugin requires", async () => {
+  const dir = await writeTree({
+    "providers.mjs": `let builds = 0;
+export default {
+  name: "shared",
+  provides: {
+    graph: {
+      build() {
+        builds += 1;
+        return { builds };
+      },
+    },
+  },
+};
+`,
+    "plugin.mjs": `export default {
+  name: "fixture",
+  rules: {
+    ping: {
+      meta: { requires: ["graph"], docs: { description: "needs graph" } },
+      create(context) {
+        const artifact = context.getArtifact("graph");
+        context.report({
+          severity: "error",
+          file: context.getFiles()[0],
+          range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
+          message: \`graph builds=\${artifact.builds}\`,
+          suggestion: "n/a",
+        });
+      },
+    },
+    again: {
+      meta: { requires: ["graph"], docs: { description: "needs graph too" } },
+      create(context) {
+        const artifact = context.getArtifact("graph");
+        context.report({
+          severity: "error",
+          file: context.getFiles()[0],
+          range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
+          message: \`again builds=\${artifact.builds}\`,
+          suggestion: "n/a",
+        });
+      },
+    },
+  },
+};
+`,
+    "code-invariants.config.json": JSON.stringify({
+      plugins: ["./providers.mjs", "./plugin.mjs"],
+      rules: { "fixture/ping": "error", "fixture/again": "error" },
+    }),
+    "src/hello.ts": "export const n = 1;\n",
+  });
+  const lines: string[] = [];
+  expect(await check(dir, (m) => lines.push(String(m)), silent)).toBe(1);
+  const out = lines.join("\n");
+  expect(out).toMatch(/fixture\/ping\s+graph builds=1/);
+  expect(out).toMatch(/fixture\/again\s+again builds=1/);
 });
 
 test("getArtifact without require exits 2", async () => {
