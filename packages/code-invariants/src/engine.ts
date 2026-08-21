@@ -5,13 +5,11 @@ import { CONFIG_FILENAMES, ConfigError, loadConfig } from "./config.ts";
 import { createFrontend, hasFrontend } from "./frontend.ts";
 import {
   type ArtifactProvider,
-  type LanguageRule,
   NO_SUGGESTION,
+  type ParsedProject,
   type Plugin,
-  type ProjectRule,
   type Rule,
   type Severity,
-  type SourceUnit,
   type UserConfig,
   type Violation,
 } from "./index.ts";
@@ -21,10 +19,10 @@ const DEFAULT_INCLUDE = ["**/*.ts", "**/*.tsx", "**/*.mts", "**/*.cts"];
 const DEFAULT_EXCLUDE = ["**/node_modules/**", "**/dist/**"];
 const TS_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
 
-type Enabled<T extends Rule> = {
+type Enabled = {
   id: string;
   severity: Exclude<Severity, "off">;
-  rule: T;
+  rule: Rule;
 };
 
 export async function check(
@@ -60,33 +58,25 @@ async function runCheck(cwd: string, out: (msg: string) => void): Promise<number
     return 0;
   }
 
-  const { languageRules, projectRules } = partitionEnabled(enabled, config.languages);
-
-  const langPipelines: { language: string; rules: Enabled<LanguageRule>[]; files: string[] }[] = [];
-  for (const language of config.languages) {
-    const matching = languageRules.filter((item) => item.rule.meta.languages.includes(language));
-    if (matching.length === 0) {
-      continue;
-    }
-    langPipelines.push({
-      language,
-      rules: matching,
-      files: await listLanguageFiles(cwd, config),
-    });
+  for (const item of enabled) {
+    validateRequires(item.id, asMeta(item.rule));
   }
 
-  const workspaceFiles =
-    projectRules.length > 0 ? await listWorkspaceFiles(cwd, config) : undefined;
-  const anyFiles =
-    langPipelines.some((pipeline) => pipeline.files.length > 0) ||
-    (workspaceFiles !== undefined && workspaceFiles.length > 0);
-  if (!anyFiles) {
+  const files = await listWorkspaceFiles(cwd, config);
+  if (files.length === 0) {
     out("No files to check.");
     return 0;
   }
 
+  const displayPaths = files.map((abs) => displayPath(cwd, abs));
+  const artifacts = await buildRequiredArtifacts(plugins, enabled, config, {
+    cwd,
+    files: displayPaths,
+    exclude: mergedExclude(config),
+  });
+
   const violations: Violation[] = [];
-  const report = (item: Enabled<Rule>, violation: Omit<Violation, "ruleId">) => {
+  const report = (item: Enabled, violation: Omit<Violation, "ruleId">) => {
     violations.push({
       ...violation,
       ruleId: item.id,
@@ -96,54 +86,18 @@ async function runCheck(cwd: string, out: (msg: string) => void): Promise<number
     });
   };
 
-  for (const pipeline of langPipelines) {
-    if (pipeline.files.length === 0) {
-      continue;
-    }
-    const frontend = createFrontend(pipeline.language);
-    if (frontend === undefined) {
-      const requiredBy = pipeline.rules[0]?.id ?? pipeline.language;
-      throw new ConfigError(`No frontend for ${pipeline.language} (required by ${requiredBy}).`);
-    }
-    const parsed = frontend.parseFiles(pipeline.files);
-    const displayPaths = pipeline.files.map((abs) => displayPath(cwd, abs));
-    const lookup = createSourceLookup(parsed.sources, cwd);
-    for (const item of pipeline.rules) {
-      item.rule.create({
-        id: item.id,
-        options: undefined,
-        language: pipeline.language,
-        getProject: () => parsed.project,
-        getSources: () => parsed.sources,
-        getFilenames: () => displayPaths,
-        getSource: (name) => lookup(name),
-        report(violation) {
-          report(item, violation);
-        },
-      });
-    }
-  }
-
-  if (workspaceFiles !== undefined && workspaceFiles.length > 0) {
-    const displayPaths = workspaceFiles.map((abs) => displayPath(cwd, abs));
-    const artifacts = await buildRequiredArtifacts(plugins, projectRules, {
-      cwd,
-      files: displayPaths,
-      exclude: mergedExclude(config),
+  for (const item of enabled) {
+    const allowed = new Set(requiresOf(item));
+    item.rule.create({
+      id: item.id,
+      options: undefined,
+      getCwd: () => cwd,
+      getFiles: () => displayPaths,
+      getArtifact: (id) => readArtifact(id, allowed, artifacts),
+      report(violation) {
+        report(item, violation);
+      },
     });
-    for (const item of projectRules) {
-      const allowed = new Set(item.rule.meta.requires ?? []);
-      item.rule.create({
-        id: item.id,
-        options: undefined,
-        getCwd: () => cwd,
-        getFiles: () => displayPaths,
-        getArtifact: (id) => readArtifact(id, allowed, artifacts),
-        report(violation) {
-          report(item, violation);
-        },
-      });
-    }
   }
 
   violations.sort(compareViolations);
@@ -189,7 +143,7 @@ function isPlugin(value: unknown): value is Plugin {
   return typeof rec.name === "string";
 }
 
-function resolveEnabledRules(plugins: Plugin[], rules: Record<string, Severity>): Enabled<Rule>[] {
+function resolveEnabledRules(plugins: Plugin[], rules: Record<string, Severity>): Enabled[] {
   const catalog = new Map<string, Rule>();
   for (const plugin of plugins) {
     for (const [name, rule] of Object.entries(plugin.rules ?? {})) {
@@ -202,7 +156,7 @@ function resolveEnabledRules(plugins: Plugin[], rules: Record<string, Severity>)
       `Unknown rule id${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")}. No loaded plugin defines ${unknown.length > 1 ? "these rules" : "this rule"}.`,
     );
   }
-  const enabled: Enabled<Rule>[] = [];
+  const enabled: Enabled[] = [];
   for (const [id, severity] of Object.entries(rules)) {
     if (severity === "off") {
       continue;
@@ -216,31 +170,6 @@ function resolveEnabledRules(plugins: Plugin[], rules: Record<string, Severity>)
   return enabled;
 }
 
-function partitionEnabled(
-  enabled: Enabled<Rule>[],
-  configLanguages: string[],
-): { languageRules: Enabled<LanguageRule>[]; projectRules: Enabled<ProjectRule>[] } {
-  const languageRules: Enabled<LanguageRule>[] = [];
-  const projectRules: Enabled<ProjectRule>[] = [];
-  for (const item of enabled) {
-    const meta = asMeta(item.rule);
-    const kind = meta.kind;
-    if (kind !== "language" && kind !== "project") {
-      throw new ConfigError(
-        `Rule "${item.id}" meta.kind must be "language" or "project"${kind === undefined ? "" : `; got ${JSON.stringify(kind)}`}.`,
-      );
-    }
-    if (kind === "language") {
-      validateLanguageMeta(item.id, meta, configLanguages);
-      languageRules.push(item as Enabled<LanguageRule>);
-    } else {
-      validateProjectMeta(item.id, meta);
-      projectRules.push(item as Enabled<ProjectRule>);
-    }
-  }
-  return { languageRules, projectRules };
-}
-
 function asMeta(rule: Rule): Record<string, unknown> {
   const meta = (rule as { meta?: unknown }).meta;
   if (meta === null || typeof meta !== "object" || Array.isArray(meta)) {
@@ -249,37 +178,7 @@ function asMeta(rule: Rule): Record<string, unknown> {
   return meta as Record<string, unknown>;
 }
 
-function validateLanguageMeta(
-  id: string,
-  meta: Record<string, unknown>,
-  configLanguages: string[],
-): void {
-  const languages = meta.languages;
-  if (
-    !Array.isArray(languages) ||
-    languages.length === 0 ||
-    languages.some((item) => typeof item !== "string")
-  ) {
-    throw new ConfigError(`Rule "${id}" kind "language" requires a non-empty languages array.`);
-  }
-  if ("requires" in meta && meta.requires !== undefined) {
-    throw new ConfigError(`Rule "${id}" is a language rule and must not set requires.`);
-  }
-  const intersection = languages.filter((language) => configLanguages.includes(language));
-  if (intersection.length === 0) {
-    const configured = configLanguages.length > 0 ? configLanguages.join(", ") : "(none)";
-    throw new ConfigError(
-      `Rule "${id}" languages (${languages.join(", ")}) do not intersect config.languages (${configured}).`,
-    );
-  }
-  for (const language of intersection) {
-    if (!hasFrontend(language)) {
-      throw new ConfigError(`No frontend for ${language} (required by ${id}).`);
-    }
-  }
-}
-
-function validateProjectMeta(id: string, meta: Record<string, unknown>): void {
+function validateRequires(id: string, meta: Record<string, unknown>): void {
   const requires = meta.requires;
   if (requires === undefined) {
     return;
@@ -294,22 +193,32 @@ function validateProjectMeta(id: string, meta: Record<string, unknown>): void {
   }
 }
 
+function requiresOf(item: Enabled): string[] {
+  const requires = asMeta(item.rule).requires;
+  return Array.isArray(requires) ? (requires as string[]) : [];
+}
+
 async function buildRequiredArtifacts(
   plugins: Plugin[],
-  projectRules: Enabled<ProjectRule>[],
+  enabled: Enabled[],
+  config: UserConfig,
   base: { cwd: string; files: readonly string[]; exclude: readonly string[] },
 ): Promise<Map<string, unknown>> {
   const requiredBy = new Map<string, string[]>();
-  for (const item of projectRules) {
-    for (const id of item.rule.meta.requires ?? []) {
+  for (const item of enabled) {
+    for (const id of requiresOf(item)) {
       const list = requiredBy.get(id) ?? [];
       list.push(item.id);
       requiredBy.set(id, list);
     }
   }
-  const providers = collectProviders(plugins);
+  const providers = collectProviders(plugins, config.languages);
   const artifacts = new Map<string, unknown>();
   for (const [id, rules] of requiredBy) {
+    if (isLanguageArtifact(id, config.languages)) {
+      artifacts.set(id, buildLanguageArtifact(id, rules, config.languages, base));
+      continue;
+    }
     const provider = providers.get(id);
     if (provider === undefined) {
       throw new ConfigError(
@@ -339,7 +248,42 @@ async function buildRequiredArtifacts(
   return artifacts;
 }
 
-function collectProviders(plugins: Plugin[]): Map<string, ArtifactProvider> {
+function isLanguageArtifact(id: string, configLanguages: string[]): boolean {
+  return hasFrontend(id) || configLanguages.includes(id);
+}
+
+function buildLanguageArtifact(
+  language: string,
+  rules: string[],
+  configLanguages: string[],
+  base: { cwd: string; files: readonly string[] },
+): ParsedProject {
+  if (!configLanguages.includes(language)) {
+    throw new ConfigError(
+      `Artifact "${language}" is not in config.languages (required by ${rules.join(", ")}).`,
+    );
+  }
+  const frontend = createFrontend(language);
+  if (frontend === undefined) {
+    throw new ConfigError(`No frontend for ${language} (required by ${rules.join(", ")}).`);
+  }
+  const absolutePaths = base.files
+    .map((file) => resolve(base.cwd, file))
+    .filter((abs) => languageAccepts(language, abs));
+  return frontend.parseFiles(absolutePaths);
+}
+
+function languageAccepts(language: string, path: string): boolean {
+  if (language === "typescript") {
+    return hasTsExtension(path);
+  }
+  return true;
+}
+
+function collectProviders(
+  plugins: Plugin[],
+  configLanguages: string[],
+): Map<string, ArtifactProvider> {
   const owners = new Map<string, string>();
   const providers = new Map<string, ArtifactProvider>();
   for (const plugin of plugins) {
@@ -353,6 +297,11 @@ function collectProviders(plugins: Plugin[]): Map<string, ArtifactProvider> {
     for (const [id, provider] of Object.entries(provides)) {
       if (id.length === 0) {
         throw new ConfigError(`Plugin "${plugin.name}" provides an empty artifact id.`);
+      }
+      if (isLanguageArtifact(id, configLanguages)) {
+        throw new ConfigError(
+          `Artifact "${id}" is reserved for the language frontend (plugin "${plugin.name}").`,
+        );
       }
       if (
         provider === null ||
@@ -394,25 +343,14 @@ function mergedExclude(config: UserConfig): string[] {
   return [...new Set([...(config.exclude ?? DEFAULT_EXCLUDE), ...DEFAULT_EXCLUDE])];
 }
 
-async function listLanguageFiles(cwd: string, config: UserConfig): Promise<string[]> {
-  return collectFiles(cwd, config, true);
-}
-
 async function listWorkspaceFiles(cwd: string, config: UserConfig): Promise<string[]> {
-  return collectFiles(cwd, config, false);
-}
-
-async function collectFiles(cwd: string, config: UserConfig, tsOnly: boolean): Promise<string[]> {
   const include = config.include ?? DEFAULT_INCLUDE;
-  const exclude = [...new Set([...(config.exclude ?? DEFAULT_EXCLUDE), ...DEFAULT_EXCLUDE])];
+  const exclude = mergedExclude(config);
   const found = new Set<string>();
   for (const pattern of include) {
     for await (const entry of glob(pattern, { cwd, exclude })) {
       const abs = resolve(cwd, entry);
       if (isConfigFilename(abs)) {
-        continue;
-      }
-      if (tsOnly && !hasTsExtension(abs)) {
         continue;
       }
       found.add(abs);
@@ -427,18 +365,6 @@ function hasTsExtension(path: string): boolean {
 
 function isConfigFilename(path: string): boolean {
   return (CONFIG_FILENAMES as readonly string[]).includes(basename(path));
-}
-
-function createSourceLookup(
-  sources: ReadonlyMap<string, SourceUnit>,
-  cwd: string,
-): (name: string) => SourceUnit | undefined {
-  const aliases = new Map<string, SourceUnit>();
-  for (const [abs, unit] of sources) {
-    aliases.set(abs, unit);
-    aliases.set(displayPath(cwd, abs), unit);
-  }
-  return (name) => aliases.get(name) ?? aliases.get(resolve(cwd, name));
 }
 
 function displayPath(cwd: string, file: string): string {

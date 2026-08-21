@@ -6,29 +6,22 @@ import { check } from "./engine.ts";
 
 const silent = () => {};
 
-const fixturePlugin = `const lang = (description) => ({
-  kind: "language",
-  languages: ["typescript"],
-  docs: { description },
-});
-let seen;
-let seenProject;
-let seenSources;
+const fixturePlugin = `let seen;
 let creates = 0;
 export default {
   name: "fixture",
   rules: {
     ping: {
-      meta: lang("always reports"),
+      meta: { requires: ["typescript"], docs: { description: "always reports" } },
       create(context) {
-        for (const filename of context.getFilenames()) {
-          const source = context.getSource(filename);
+        const parsed = context.getArtifact("typescript");
+        for (const [abs, source] of parsed.sources) {
           if (source == null || typeof source.getFullText !== "function") {
-            throw new Error("getSource() did not return a parsed SourceUnit");
+            throw new Error("getArtifact(typescript) did not return parsed sources");
           }
           context.report({
             severity: "error",
-            file: filename,
+            file: abs,
             range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
             message: "ping",
           });
@@ -36,92 +29,74 @@ export default {
       },
     },
     quiet: {
-      meta: lang("never reports"),
+      meta: { requires: ["typescript"], docs: { description: "never reports" } },
       create() {},
     },
     first: {
-      meta: lang("records source"),
+      meta: { requires: ["typescript"], docs: { description: "records parsed project" } },
       create(context) {
-        seen = context.getSource(context.getFilenames()[0]);
-        seenSources = context.getSources();
+        seen = context.getArtifact("typescript");
       },
     },
     second: {
-      meta: lang("checks same source"),
+      meta: { requires: ["typescript"], docs: { description: "checks same parsed project" } },
       create(context) {
-        if (context.getSource(context.getFilenames()[0]) !== seen) {
+        const parsed = context.getArtifact("typescript");
+        if (parsed !== seen) {
           context.report({
             severity: "error",
-            file: context.getFilenames()[0],
+            file: context.getFiles()[0],
             range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
             message: "parsed more than once",
           });
         }
-        if (context.getSources() !== seenSources) {
+        if (parsed.project !== seen.project) {
           context.report({
             severity: "error",
-            file: context.getFilenames()[0],
+            file: context.getFiles()[0],
+            range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
+            message: "project not shared",
+          });
+        }
+        if (parsed.sources !== seen.sources) {
+          context.report({
+            severity: "error",
+            file: context.getFiles()[0],
             range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
             message: "sources map not shared",
           });
         }
       },
     },
-    projectFirst: {
-      meta: lang("records project"),
-      create(context) {
-        seenProject = context.getProject();
-      },
-    },
-    projectSecond: {
-      meta: lang("checks same project"),
-      create(context) {
-        if (context.getProject() !== seenProject) {
-          context.report({
-            severity: "error",
-            file: context.getFilenames()[0],
-            range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
-            message: "project not shared",
-          });
-        }
-      },
-    },
     unusedExport: {
-      meta: lang("export x unused across files"),
+      meta: { requires: ["typescript"], docs: { description: "export x unused across files" } },
       create(context) {
         creates += 1;
-        const filenames = context.getFilenames();
+        const files = context.getFiles();
+        const parsed = context.getArtifact("typescript");
         if (creates !== 1) {
           context.report({
             severity: "error",
-            file: filenames[0],
+            file: files[0],
             range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
             message: \`create invoked \${creates} times\`,
           });
         }
-        if (context.language !== "typescript") {
+        if (parsed.sources.size !== 2) {
           context.report({
             severity: "error",
-            file: filenames[0],
+            file: files[0],
             range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
-            message: \`expected language typescript, got \${context.language}\`,
+            message: \`expected 2 sources, got \${parsed.sources.size}\`,
           });
         }
-        if (context.getSources().size !== 2) {
-          context.report({
-            severity: "error",
-            file: filenames[0],
-            range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
-            message: \`expected 2 sources, got \${context.getSources().size}\`,
-          });
-        }
-        const texts = filenames.map((filename) => {
-          const source = context.getSource(filename);
+        const texts = [];
+        for (const [abs, source] of parsed.sources) {
           if (source == null || typeof source.getFullText !== "function") {
-            throw new Error("getSource() did not return a parsed SourceUnit");
+            throw new Error("getArtifact(typescript) did not return parsed sources");
           }
-          return { filename, text: source.getFullText() };
-        });
+          texts.push({ filename: abs, text: source.getFullText() });
+        }
         const exporter = texts.find((item) => /export const x\\b/.test(item.text));
         const importer = texts.find((item) => /import\\s+\\{\\s*x\\s*\\}/.test(item.text));
         if (exporter !== undefined && importer === undefined) {
@@ -135,7 +110,7 @@ export default {
       },
     },
     workspacePing: {
-      meta: { kind: "project", docs: { description: "always reports from workspace" } },
+      meta: { docs: { description: "always reports from workspace" } },
       create(context) {
         const files = context.getFiles();
         context.report({
@@ -147,16 +122,8 @@ export default {
       },
     },
     listed: {
-      meta: { kind: "project", docs: { description: "checks listed files" } },
+      meta: { docs: { description: "checks listed files" } },
       create(context) {
-        if ("getProject" in context || "getSources" in context || "getFilenames" in context) {
-          context.report({
-            severity: "error",
-            file: "src/hello.ts",
-            range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
-            message: "project rule received language AST context",
-          });
-        }
         if (typeof context.getCwd() !== "string" || context.getCwd().length === 0) {
           context.report({
             severity: "error",
@@ -176,7 +143,7 @@ export default {
       },
     },
     hasNotes: {
-      meta: { kind: "project", docs: { description: "notes.txt must be listed" } },
+      meta: { docs: { description: "notes.txt must be listed" } },
       create(context) {
         if (!context.getFiles().includes("notes.txt")) {
           context.report({
@@ -184,6 +151,29 @@ export default {
             file: "notes.txt",
             range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
             message: \`notes.txt not listed: \${context.getFiles().join(",")}\`,
+          });
+        }
+      },
+    },
+    tsOnly: {
+      meta: { requires: ["typescript"], docs: { description: "language provider skips non-TS" } },
+      create(context) {
+        const parsed = context.getArtifact("typescript");
+        const files = context.getFiles();
+        if (!files.includes("notes.txt") || !files.includes("src/hello.ts")) {
+          context.report({
+            severity: "error",
+            file: "src/hello.ts",
+            range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
+            message: \`expected notes.txt and src/hello.ts in getFiles: \${files.join(",")}\`,
+          });
+        }
+        if (parsed.sources.size !== 1) {
+          context.report({
+            severity: "error",
+            file: "src/hello.ts",
+            range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
+            message: \`expected 1 TS source, got \${parsed.sources.size}\`,
           });
         }
       },
@@ -266,11 +256,11 @@ test("prints suggestion line only when it is not the sentinel", async () => {
   name: "fixture",
   rules: {
     hint: {
-      meta: { kind: "language", languages: ["typescript"], docs: { description: "hint" } },
+      meta: { requires: ["typescript"], docs: { description: "hint" } },
       create(context) {
         context.report({
           severity: "error",
-          file: context.getFilenames()[0],
+          file: context.getFiles()[0],
           range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
           message: "hint",
           suggestion: "Do the thing.",
@@ -319,19 +309,6 @@ test("TypeScript frontend parses each file once for all rules", async () => {
   expect(await check(dir, (m) => lines.push(String(m)), silent)).toBe(0);
   expect(lines.join("\n")).not.toMatch(/parsed more than once/);
   expect(lines.join("\n")).not.toMatch(/sources map not shared/);
-});
-
-test("getProject returns the same object for every rule", async () => {
-  const dir = await writeTree({
-    "plugin.mjs": fixturePlugin,
-    "code-invariants.config.json": config({
-      "fixture/projectFirst": "error",
-      "fixture/projectSecond": "error",
-    }),
-    "src/hello.ts": "export const n = 1;\n",
-  });
-  const lines: string[] = [];
-  expect(await check(dir, (m) => lines.push(String(m)), silent)).toBe(0);
   expect(lines.join("\n")).not.toMatch(/project not shared/);
 });
 
@@ -350,10 +327,9 @@ test("create runs once and can report a cross-file violation", async () => {
   );
   expect(out).not.toMatch(/create invoked/);
   expect(out).not.toMatch(/expected 2 sources/);
-  expect(out).not.toMatch(/expected language typescript/);
 });
 
-test("project rule lists workspace files without AST APIs", async () => {
+test("getFiles lists workspace files", async () => {
   const dir = await writeTree({
     "plugin.mjs": fixturePlugin,
     "code-invariants.config.json": config({ "fixture/listed": "error" }),
@@ -361,12 +337,11 @@ test("project rule lists workspace files without AST APIs", async () => {
   });
   const lines: string[] = [];
   expect(await check(dir, (m) => lines.push(String(m)), silent)).toBe(0);
-  expect(lines.join("\n")).not.toMatch(/language AST context/);
   expect(lines.join("\n")).not.toMatch(/not listed/);
   expect(lines.join("\n")).not.toMatch(/getCwd missing/);
 });
 
-test("only project rules can run against non-TS files", async () => {
+test("getFiles includes non-TS paths", async () => {
   const dir = await writeTree({
     "plugin.mjs": fixturePlugin,
     "code-invariants.config.json": config(
@@ -380,57 +355,41 @@ test("only project rules can run against non-TS files", async () => {
   expect(lines.join("\n")).not.toMatch(/notes\.txt not listed/);
 });
 
-test("missing kind exits 2", async () => {
+test("language provider skips non-TS paths", async () => {
   const dir = await writeTree({
-    "plugin.mjs": pluginWith(`{ docs: { description: "no kind" } }`),
-    "code-invariants.config.json": config({ "fixture/ping": "error" }),
-    "src/hello.ts": "export const n = 1;\n",
-  });
-  const errors: string[] = [];
-  expect(await check(dir, silent, (m) => errors.push(String(m)))).toBe(2);
-  expect(errors.join("\n")).toMatch(/meta\.kind must be "language" or "project"/);
-});
-
-test("invalid kind exits 2", async () => {
-  const dir = await writeTree({
-    "plugin.mjs": pluginWith(`{ kind: "workspace", docs: { description: "bad kind" } }`),
-    "code-invariants.config.json": config({ "fixture/ping": "error" }),
-    "src/hello.ts": "export const n = 1;\n",
-  });
-  const errors: string[] = [];
-  expect(await check(dir, silent, (m) => errors.push(String(m)))).toBe(2);
-  expect(errors.join("\n")).toMatch(/meta\.kind must be "language" or "project"/);
-});
-
-test("language rule without languages exits 2", async () => {
-  const dir = await writeTree({
-    "plugin.mjs": pluginWith(`{ kind: "language", docs: { description: "no languages" } }`),
-    "code-invariants.config.json": config({ "fixture/ping": "error" }),
-    "src/hello.ts": "export const n = 1;\n",
-  });
-  const errors: string[] = [];
-  expect(await check(dir, silent, (m) => errors.push(String(m)))).toBe(2);
-  expect(errors.join("\n")).toMatch(/requires a non-empty languages array/);
-});
-
-test("language rule whose languages miss config.languages exits 2", async () => {
-  const dir = await writeTree({
-    "plugin.mjs": pluginWith(
-      `{ kind: "language", languages: ["python"], docs: { description: "python only" } }`,
+    "plugin.mjs": fixturePlugin,
+    "code-invariants.config.json": config(
+      { "fixture/tsOnly": "error" },
+      { include: ["**/*.ts", "**/*.txt"] },
     ),
-    "code-invariants.config.json": config({ "fixture/ping": "error" }),
+    "src/hello.ts": "export const n = 1;\n",
+    "notes.txt": "hello\n",
+  });
+  const lines: string[] = [];
+  expect(await check(dir, (m) => lines.push(String(m)), silent)).toBe(0);
+  expect(lines.join("\n")).not.toMatch(/expected notes\.txt/);
+  expect(lines.join("\n")).not.toMatch(/expected 1 TS source/);
+});
+
+test("requires typescript when not in config.languages exits 2", async () => {
+  const dir = await writeTree({
+    "plugin.mjs": pluginWith(`{ requires: ["typescript"], docs: { description: "needs ts" } }`),
+    "code-invariants.config.json": JSON.stringify({
+      languages: ["python"],
+      plugins: ["./plugin.mjs"],
+      rules: { "fixture/ping": "error" },
+    }),
     "src/hello.ts": "export const n = 1;\n",
   });
   const errors: string[] = [];
   expect(await check(dir, silent, (m) => errors.push(String(m)))).toBe(2);
-  expect(errors.join("\n")).toMatch(/do not intersect config\.languages/);
+  expect(errors.join("\n")).toMatch(/Artifact "typescript" is not in config\.languages/);
+  expect(errors.join("\n")).toMatch(/fixture\/ping/);
 });
 
-test("language rule for a language with no frontend exits 2", async () => {
+test("requires python with no frontend exits 2", async () => {
   const dir = await writeTree({
-    "plugin.mjs": pluginWith(
-      `{ kind: "language", languages: ["python"], docs: { description: "python only" } }`,
-    ),
+    "plugin.mjs": pluginWith(`{ requires: ["python"], docs: { description: "needs python" } }`),
     "code-invariants.config.json": JSON.stringify({
       languages: ["python"],
       plugins: ["./plugin.mjs"],
@@ -443,17 +402,15 @@ test("language rule for a language with no frontend exits 2", async () => {
   expect(errors.join("\n")).toMatch(/No frontend for python \(required by fixture\/ping\)/);
 });
 
-test("requires on a language rule exits 2", async () => {
+test("invalid requires exits 2", async () => {
   const dir = await writeTree({
-    "plugin.mjs": pluginWith(
-      `{ kind: "language", languages: ["typescript"], requires: ["dupehound"], docs: { description: "bad requires" } }`,
-    ),
+    "plugin.mjs": pluginWith(`{ requires: [""], docs: { description: "bad requires" } }`),
     "code-invariants.config.json": config({ "fixture/ping": "error" }),
     "src/hello.ts": "export const n = 1;\n",
   });
   const errors: string[] = [];
   expect(await check(dir, silent, (m) => errors.push(String(m)))).toBe(2);
-  expect(errors.join("\n")).toMatch(/must not set requires/);
+  expect(errors.join("\n")).toMatch(/invalid requires/);
 });
 
 const fakeProviderPlugin = `let builds = 0;
@@ -469,7 +426,7 @@ export default {
   },
   rules: {
     alpha: {
-      meta: { kind: "project", requires: ["fake"], docs: { description: "reads fake" } },
+      meta: { requires: ["fake"], docs: { description: "reads fake" } },
       create(context) {
         const art = context.getArtifact("fake");
         context.report({
@@ -482,7 +439,7 @@ export default {
       },
     },
     beta: {
-      meta: { kind: "project", requires: ["fake"], docs: { description: "reads fake too" } },
+      meta: { requires: ["fake"], docs: { description: "reads fake too" } },
       create(context) {
         const art = context.getArtifact("fake");
         context.report({
@@ -516,9 +473,7 @@ test("artifact provider builds once and exposes getArtifact", async () => {
 
 test("missing provider exits 2 and names the rule", async () => {
   const dir = await writeTree({
-    "plugin.mjs": pluginWith(
-      `{ kind: "project", requires: ["ghost"], docs: { description: "needs ghost" } }`,
-    ),
+    "plugin.mjs": pluginWith(`{ requires: ["ghost"], docs: { description: "needs ghost" } }`),
     "code-invariants.config.json": config({ "fixture/ping": "error" }),
     "src/hello.ts": "export const n = 1;\n",
   });
@@ -541,7 +496,7 @@ test("provider build throw exits 2 and names the rule", async () => {
   },
   rules: {
     ping: {
-      meta: { kind: "project", requires: ["fake"], docs: { description: "needs fake" } },
+      meta: { requires: ["fake"], docs: { description: "needs fake" } },
       create() {},
     },
   },
@@ -563,7 +518,7 @@ test("duplicate artifact id exits 2", async () => {
   provides: { fake: { build() { return 1; } } },
   rules: {
     ping: {
-      meta: { kind: "project", requires: ["fake"], docs: { description: "needs fake" } },
+      meta: { requires: ["fake"], docs: { description: "needs fake" } },
       create() {},
     },
   },
@@ -594,7 +549,7 @@ test("getArtifact without require exits 2", async () => {
   provides: { fake: { build() { return { ok: true }; } } },
   rules: {
     listed: {
-      meta: { kind: "project", docs: { description: "no require" } },
+      meta: { docs: { description: "no require" } },
       create(context) {
         context.getArtifact("fake");
       },
@@ -610,7 +565,7 @@ test("getArtifact without require exits 2", async () => {
   expect(errors.join("\n")).toMatch(/getArtifact\("fake"\) requires meta.requires/);
 });
 
-test("mixed language and project rules both report", async () => {
+test("mixed language and plugin artifacts both report", async () => {
   const dir = await writeTree({
     "plugin.mjs": fixturePlugin,
     "code-invariants.config.json": config({
@@ -626,4 +581,76 @@ test("mixed language and project rules both report", async () => {
   expect(out).toMatch(/fixture\/unusedExport\s+export x is unused across files/);
   expect(out).toMatch(/fixture\/workspacePing\s+workspace ping/);
   expect(out).not.toMatch(/create invoked/);
+});
+
+test("language and plugin artifacts in one run each build once", async () => {
+  const dir = await writeTree({
+    "plugin.mjs": `let fakeBuilds = 0;
+export default {
+  name: "fixture",
+  provides: {
+    fake: {
+      build() {
+        fakeBuilds += 1;
+        return { fakeBuilds };
+      },
+    },
+  },
+  rules: {
+    lang: {
+      meta: { requires: ["typescript"], docs: { description: "reads ts" } },
+      create(context) {
+        const parsed = context.getArtifact("typescript");
+        context.report({
+          severity: "error",
+          file: context.getFiles()[0],
+          range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
+          message: \`lang sources=\${parsed.sources.size}\`,
+          suggestion: "n/a",
+        });
+      },
+    },
+    plug: {
+      meta: { requires: ["fake"], docs: { description: "reads fake" } },
+      create(context) {
+        const art = context.getArtifact("fake");
+        context.report({
+          severity: "error",
+          file: context.getFiles()[0],
+          range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
+          message: \`plug builds=\${art.fakeBuilds}\`,
+          suggestion: "n/a",
+        });
+      },
+    },
+    both: {
+      meta: { requires: ["typescript", "fake"], docs: { description: "reads both" } },
+      create(context) {
+        const parsed = context.getArtifact("typescript");
+        const art = context.getArtifact("fake");
+        context.report({
+          severity: "error",
+          file: context.getFiles()[0],
+          range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
+          message: \`both sources=\${parsed.sources.size} builds=\${art.fakeBuilds}\`,
+          suggestion: "n/a",
+        });
+      },
+    },
+  },
+};
+`,
+    "code-invariants.config.json": config({
+      "fixture/lang": "error",
+      "fixture/plug": "error",
+      "fixture/both": "error",
+    }),
+    "src/hello.ts": "export const n = 1;\n",
+  });
+  const lines: string[] = [];
+  expect(await check(dir, (m) => lines.push(String(m)), silent)).toBe(1);
+  const out = lines.join("\n");
+  expect(out).toMatch(/fixture\/lang\s+lang sources=1/);
+  expect(out).toMatch(/fixture\/plug\s+plug builds=1/);
+  expect(out).toMatch(/fixture\/both\s+both sources=1 builds=1/);
 });

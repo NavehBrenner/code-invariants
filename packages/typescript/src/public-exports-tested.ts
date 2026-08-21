@@ -1,5 +1,5 @@
 import { dirname, extname, join, resolve } from "node:path";
-import type { LanguageRule, LanguageRuleContext, Range } from "code-invariants";
+import type { ParsedProject, Range, Rule, RuleContext } from "code-invariants";
 import { type ExportDeclaration, Node, type SourceFile, SyntaxKind } from "ts-morph";
 
 const TS_EXTS = [".ts", ".tsx", ".mts", ".cts"] as const;
@@ -13,18 +13,17 @@ type PublicExport = {
   range: Range;
 };
 
-export const publicExportsTested: LanguageRule = {
+export const publicExportsTested: Rule = {
   meta: {
-    kind: "language",
-    languages: ["typescript"],
+    requires: ["typescript"],
     docs: {
       description:
         "Every public value export in included non-test sources must be referenced from a test path.",
     },
   },
   create(context) {
-    const sources = context.getSources();
-    const displayByAbs = mapDisplayPaths(context);
+    const sources = (context.getArtifact("typescript") as ParsedProject).sources;
+    const displayByAbs = mapDisplayPaths(context, sources);
     const referenced = new Set<string>();
     const exported: PublicExport[] = [];
 
@@ -71,19 +70,16 @@ function isDeclarationFile(filePath: string): boolean {
   return /\.d\.(?:ts|mts|cts)$/.test(posix(filePath));
 }
 
-function mapDisplayPaths(context: LanguageRuleContext): Map<string, string> {
-  const sources = context.getSources();
+function mapDisplayPaths(
+  context: RuleContext,
+  sources: ReadonlyMap<string, unknown>,
+): Map<string, string> {
+  const cwd = context.getCwd();
   const displayByAbs = new Map<string, string>();
-  for (const name of context.getFilenames()) {
-    const unit = context.getSource(name);
-    if (unit === undefined) {
-      continue;
-    }
-    for (const [abs, src] of sources) {
-      if (src === unit) {
-        displayByAbs.set(abs, name);
-        break;
-      }
+  for (const name of context.getFiles()) {
+    const abs = resolve(cwd, name);
+    if (sources.has(abs)) {
+      displayByAbs.set(abs, name);
     }
   }
   return displayByAbs;

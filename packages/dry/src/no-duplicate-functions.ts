@@ -1,9 +1,8 @@
-import type { ProjectRule, Violation } from "code-invariants";
+import type { Rule, Violation } from "code-invariants";
 import type { DupehoundCluster, DupehoundIndex } from "./dupehound.ts";
 
-export const noDuplicateFunctions: ProjectRule = {
+export const noDuplicateFunctions: Rule = {
   meta: {
-    kind: "project",
     requires: ["dupehound"],
     docs: {
       description:

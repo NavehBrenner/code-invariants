@@ -26,7 +26,7 @@ These decisions are considered stable unless a major new constraint appears:
 4. **Plugins**  
    First-class and user-writable. There is one explicit contract (see § Plugin contract). Plugins can be published as npm packages or loaded from local paths. Agent skills for creating and maintaining plugins are part of the deliverable.  
    **v1 plugin language is TypeScript only.** Plugins are TypeScript/JavaScript packages that export the `Plugin` interface. Python-written plugins may be supported later via the same protocol once a Python frontend exists.  
-    **Core has no built-in rule bag.** Every check is a plugin rule. Core is the engine, language frontends, config/CLI, and a generic project-artifact seam — not a default catalog and **not** a dupehound (or other niche binary) host. Baseline TypeScript rules live in `@code-invariants/typescript` (`Plugin.name: "ts"`). React compositional rules live in `@code-invariants/react` (`Plugin.name: "react"`). Structural DRY lives in `@code-invariants/dry` (`Plugin.name: "dry"`), which **provides** the `dupehound` artifact. A plugin may ship `configs.recommended`; installing a plugin does **not** enable its rules (locked #2).
+    **Core has no built-in rule bag.** Every check is a plugin rule. Core is the engine, language frontends, config/CLI, and a generic artifact seam — not a default catalog and **not** a dupehound (or other niche binary) host. Baseline TypeScript rules live in `@code-invariants/typescript` (`Plugin.name: "ts"`). React compositional rules live in `@code-invariants/react` (`Plugin.name: "react"`). Structural DRY lives in `@code-invariants/dry` (`Plugin.name: "dry"`), which **provides** the `dupehound` artifact. A plugin may ship `configs.recommended`; installing a plugin does **not** enable its rules (locked #2).
 
 5. **Runtime helpers**  
    Optional companion packages (e.g. a future official `DataRegion`). Static rules work both with the official helpers and with equivalent structural patterns the user already has. **Helpers are optional; this WP ships none.** TanStack Query detectors live under `@code-invariants/react`, not a separate package.
@@ -47,14 +47,18 @@ These decisions are considered stable unless a major new constraint appears:
 
    **Overlap family:** `import-boundary` / layers / no-import-from / no-deep-import / max-relative-depth are one policy family. The v1 TypeScript plugin catalogs **none** of them unless a future WP proves a unique agent-facing gap. Prefer configuring Biome + dependency-cruiser over reimplementation.
 
-8. **Two rule kinds / two pipelines**  
-   No unified cross-language AST. Same product idea on two languages ⇒ **two language rules**, not one multi-AST rule. Rules declare `meta.kind` with **no default** (`"language"` | `"project"`). Missing or invalid kind is a load/check error (exit 2).
+8. **One rule type / one engine loop**  
+   No unified cross-language AST. Same product idea on two languages ⇒ **two rules** (convention, not `meta.kind`), each `requires` that language’s artifact id. There is a single `Rule` / `RuleContext`. Optional `meta.requires: string[]` names artifacts. Language AST id = language name (`"typescript"` → today’s `ParsedProject`). `config.languages` is an **allowlist**: requiring a language not listed → exit 2.
 
-   **Language rules** (`kind: "language"`) must declare a non-empty `languages` array. Each frontend parses that language **once per language run** and returns a `ParsedProject` (native `project` + `sources` map). The same object is reused by every language rule for that language. `create` runs once per enabled language rule **per language** and receives `LanguageRuleContext` (`language`, `getProject`, `getSources`, `getSource(name)`, `getFilenames`). A language rule is never given another language’s parse, and must not set `requires`.
+   **Who provides:** core wraps language frontends as providers keyed by language name. Plugins `provides` **non-language artifacts only** (`dupehound` stays in `@code-invariants/dry`). Language ids are reserved (plugin `provides.typescript` → exit 2).
 
-     **Project rules** (`kind: "project"`) are **workspace-level**, not a ts-morph `Project`. They run in a **separate** pipeline with `ProjectRuleContext` (`getCwd`, `getFiles`, `getArtifact` when required). They never receive `getProject()` / source units / language AST APIs. Name clash: `kind: "project"` ≠ `getProject()`. Optional `requires?: string[]` names **project artifacts**. The engine unions `requires` from **enabled** project rules, invokes matching plugin `provides[id].build` **once** per id, caches the result, and exposes it via `getArtifact(id)`. Missing provider, duplicate provider id, or build throw → exit 2 (fail closed); the message names the rule id(s). Language ASTs stay on the frontend path (parse once, share) — not this table. Not a vector store. `code-invariants index` CLI stays unimplemented. Dupehound (structural fingerprints / winnowing, **not** embeddings) is provided by `@code-invariants/dry` as artifact id `"dupehound"`.
+   **Engine:** resolve enabled rules → validate `requires` → union ids → **build each once** (core language **or** plugin `provides`) → `create` every rule once with the same context. One include/exclude file pass; language `build` filters extensions (TS: `.ts`/`.tsx`/`.mts`/`.cts`). Empty sources after filter is success, not an error. No language vs project pipelines.
 
-   This avoids both the precision loss of a lowest-common-denominator IR and the cost of re-parsing for every rule, and keeps non-AST checks out of the language loop.
+   **Fail closed (exit 2, name rule ids):** invalid `requires`; language id not in `config.languages`; language in allowlist but no frontend; missing plugin provider; duplicate provider id; reserved language id on plugin `provides`; build throw; `getArtifact` for an id not in that rule’s `requires`. Do not silently skip.
+
+   Not a vector store. `code-invariants index` CLI stays unimplemented. Dupehound (structural fingerprints / winnowing, **not** embeddings) is provided by `@code-invariants/dry` as artifact id `"dupehound"`.
+
+   This avoids both the precision loss of a lowest-common-denominator IR and the cost of re-parsing for every rule.
 
 9. **Performance approach**  
    TypeScript core is the deliberate starting point for velocity and for a TypeScript-native plugin ecosystem. Performance is treated as a hard constraint:
@@ -78,18 +82,17 @@ These decisions are considered stable unless a major new constraint appears:
 ┌────────────────────────────▼────────────────────────────────┐
 │                     Rule Engine (core)                      │
 │  - loads plugins                                            │
-│  - orchestrates frontends + project artifacts               │
-│  - collects violations with location + fix hints            │
+│  - unions requires; builds each artifact once               │
+│  - one create() loop; collects violations                   │
 └──────────────┬──────────────────────────────┬───────────────┘
                │                              │
       ┌─────────▼─────────┐          ┌─────────▼─────────┐
-      │  Language Frontends│          │  Project artifacts│
-      │  - TypeScript      │          │  (plugin provides)│
-      │    (ts-morph)      │          │  e.g. dupehound   │
-      │  - Python (later)  │          │  in @…/dry        │
-      │    (libCST /       │          │  embeddings later │
-      │     tree-sitter)   │          └───────────────────┘
-      └────────────────────┘
+      │  Language artifacts│          │  Plugin artifacts │
+      │  (core frontends)  │          │  (plugin provides)│
+      │  id = language name│          │  e.g. dupehound   │
+      │  "typescript" →    │          │  in @…/dry        │
+      │  ParsedProject     │          │  embeddings later │
+      └────────────────────┘          └───────────────────┘
 ```
 
 ### Core concepts
@@ -103,7 +106,7 @@ These decisions are considered stable unless a major new constraint appears:
   Product rules in this repo (`ts/public-exports-tested`, `react/no-fetch-in-useeffect`, `react/query-error-handled`, `dry/no-duplicate-functions`) **must** use concrete suggestions, not the sentinel. CLI prints a `suggestion:` line unless the value is exactly `NO_SUGGESTION`. `report()` fills the sentinel at runtime if the field is missing (JS plugins keep working).
 - **Frontend**: Language-specific AST / symbol provider that implements the frontend protocol.
 - **Plugin**: A package that exports one or more rules (and optionally recommended configs and `provides` artifact builders) conforming to the plugin contract.
-- **Artifact**: Opaque value built once per check when an enabled project rule `requires` its id. `@code-invariants/dry` provides `"dupehound"` (structural fingerprints). Vector / embedding index is still future.
+- **Artifact**: Opaque value built once per check when an enabled rule `requires` its id. Language AST id = language name (`"typescript"` → `ParsedProject` from the core frontend). `@code-invariants/dry` provides `"dupehound"` (structural fingerprints). Vector / embedding index is still future.
 
 ## 2. Plugin contract (explicit)
 
@@ -131,47 +134,22 @@ export interface ArtifactBuildContext {
   requiredBy: readonly string[]; // enabled rule ids that require this artifact
 }
 
-export type Rule = LanguageRule | ProjectRule; // discriminated on meta.kind; no default
-
-export interface LanguageRule {
+export interface Rule {
   meta: {
-    kind: "language";
-    languages: string[];        // required, non-empty; e.g. ["typescript"]
+    requires?: string[];        // artifact ids; language AST id = language name
     docs: { description: string; url?: string };
     schema?: JSONSchema;
     fixable?: "code" | "whitespace";
   };
-  create(context: LanguageRuleContext): void | RuleListener;
+  create(context: RuleContext): void | RuleListener;
 }
 
-export interface ProjectRule {
-  meta: {
-    kind: "project";            // workspace-level, **not** ts-morph Project
-    requires?: string[];        // artifact ids (this plugin: ["dupehound"])
-    docs: { description: string; url?: string };
-    schema?: JSONSchema;
-    fixable?: "code" | "whitespace";
-  };
-  create(context: ProjectRuleContext): void | RuleListener;
-}
-
-export interface LanguageRuleContext {
+export interface RuleContext {
   id: string;
   options: unknown;             // already validated against schema
   report(violation: Omit<Violation, "ruleId">): void;
-  language: string;             // pipeline language for this invocation
-  getProject(): unknown;        // native project for **that** language only
-  getSources(): ReadonlyMap<string, SourceUnit>;
-  getFilenames(): readonly string[];
-  getSource(filename: string): SourceUnit | undefined;
-}
-
-export interface ProjectRuleContext {
-  id: string;
-  options: unknown;
-  report(violation: Omit<Violation, "ruleId">): void;
   getCwd(): string;
-  getFiles(): readonly string[]; // display paths, stable order; no AST APIs
+  getFiles(): readonly string[]; // one include/exclude pass, display paths
   getArtifact(id: string): unknown; // only if meta.requires includes id
 }
 
@@ -188,9 +166,9 @@ export interface ParsedProject {
 }
 ```
 
-Language rules: `create` is invoked once per enabled rule **per language**, not once per file, and only for languages in both `meta.languages` and `config.languages`. Project rules (`kind: "project"` = workspace-level, **not** ts-morph `Project`) run in a separate pipeline and must not receive language AST context. Rules never touch the filesystem or the CLI; they only receive their context and call `context.report`. A plugin `provides.build` function **may** spawn tools; rules must not. This keeps rules testable and isolatable.
+`create` is invoked once per enabled rule, not once per file. Rules never touch the filesystem or the CLI; they only receive their context and call `context.report`. Language consumers: `requires: ["typescript"]` and `getArtifact("typescript")` as `ParsedProject` (`.project` / `.sources`). A plugin `provides.build` function **may** spawn tools; rules must not. Plugins must not `provides` a language id. This keeps rules testable and isolatable.
 
-Enabled language rule whose `languages` do not intersect `config.languages` is an error (do not silently skip). A language listed on an enabled rule with no frontend is an error. `requires` on a language rule is an error. Missing/invalid `kind` or empty `languages` on a language rule is an error.
+Invalid `requires`, a required language not in `config.languages`, a language in the allowlist with no frontend, a missing plugin provider, a duplicate or reserved provider id, a build throw, or `getArtifact` for an id not in that rule’s `requires` is an error (exit 2; do not silently skip). The message names the rule id(s).
 
 A custom plugin is simply an npm package (or local folder) that exports a `Plugin`. The core discovers it from the `plugins` array in the user’s config. Core never ships a default rule table; a rule exists only if a loaded plugin lists it. Installing `@code-invariants/typescript` (or any plugin) does not enable rules until they appear in `config.rules`. `configs.recommended` is an optional preset the user copies in — the engine does not apply it on install.
 
@@ -201,7 +179,7 @@ A custom plugin is simply an npm package (or local folder) that exports a `Plugi
 ### R1 — Query error handling (`react/query-error-handled`)
 
 Implemented in `@code-invariants/react` as **`react/query-error-handled`**.  
-`kind: "language"`, `languages: ["typescript"]`. Structural only — no mandatory DataRegion / helper.
+`requires: ["typescript"]`; read AST from `getArtifact("typescript")`. Structural only — no mandatory DataRegion / helper.
 
 **Intent:** Every TanStack `useQuery` (and locked twins) usage must not ignore errors.
 
@@ -222,7 +200,7 @@ Implemented in `@code-invariants/react` as **`react/query-error-handled`**.
 ### `react/no-fetch-in-useeffect`
 
 Implemented in `@code-invariants/react`.  
-`kind: "language"`, `languages: ["typescript"]`. Aligns with React’s [You Might Not Need an Effect](https://react.dev/learn/you-might-not-need-an-effect).
+`requires: ["typescript"]`; read AST from `getArtifact("typescript")`. Aligns with React’s [You Might Not Need an Effect](https://react.dev/learn/you-might-not-need-an-effect).
 
 **Intent:** Do not kick off HTTP data loading inside `useEffect` / `useLayoutEffect`. Prefer data libraries, route loaders, or RSC.
 
@@ -249,13 +227,13 @@ Implemented in `@code-invariants/react`.
 ### R4 — Structural DRY (`dry/no-duplicate-functions`)
 
 Implemented in `@code-invariants/dry` as **`dry/no-duplicate-functions`**.  
-`kind: "project"`, `requires: ["dupehound"]`. Uses only `ProjectRuleContext` (`getCwd`, `getFiles`, `getArtifact`, `report`). The **dry plugin** wraps [dupehound](https://github.com/Rafaelpta/dupehound) `scan --json` in `provides.dupehound.build`; core does not spawn it. We do not reimplement fingerprints.
+`requires: ["dupehound"]`. Typed as `Rule`; uses `getCwd`, `getFiles`, `getArtifact`, `report`. The **dry plugin** wraps [dupehound](https://github.com/Rafaelpta/dupehound) `scan --json` in `provides.dupehound.build`; core does not spawn it. We do not reimplement fingerprints.
 
 **Intent:** No structurally duplicate functions/methods in included non-test, non-generated sources.
 
 | Topic | Decision |
 |--------|----------|
-| Engine | dupehound structural fingerprints (tree-sitter + winnowing — **not** embeddings). Dry provides artifact `"dupehound"`; the engine builds it once when any enabled project rule `requires: ["dupehound"]` and exposes `getArtifact("dupehound")`. |
+| Engine | dupehound structural fingerprints (tree-sitter + winnowing — **not** embeddings). Dry provides artifact `"dupehound"`; the engine builds it once when any enabled rule `requires: ["dupehound"]` and exposes `getArtifact("dupehound")`. |
 | Out | Embeddings, Slopo, `query --similar`, auto-merge / codemods, TypeScript interface/type-alias / whole-class clone detection (needs another provider, e.g. similarity-ts or the checker — not more dupehound flags). Incremental `dupehound check --diff` is later (`--diff` / WP-015). |
 | Unit | All function-likes dupehound extracts (top-level, methods, arrow/`const` function-likes, `<anonymous>`). |
 | Skip | Tests (`--exclude-tests` + path rules), generated (dupehound defaults + our exclude), files outside include (post-filter). |
@@ -273,18 +251,18 @@ See [docs/rulesets/dry.md](./rulesets/dry.md).
 ### R5 — Test presence (static)
 
 Implemented in `@code-invariants/typescript` as **`ts/public-exports-tested`**.  
-`kind: "language"`, `languages: ["typescript"]`. Coverage tools are out of scope for this check.
+`requires: ["typescript"]`; read AST from `getArtifact("typescript")`. Coverage tools are out of scope for this check.
 
 **Intent:** Every **public** value export in included non-test sources must be referenced at least once from a **test** path.
 
 | Topic | Decision |
 |--------|----------|
-| Public export | Value exports in non-test, non-`.d.ts` files already in the language pipeline: `export function` / `class` / `const` / `let` / `var` / `enum`, `export default`, `export { name }`, `export { name } from`. Name for default is `"default"`. |
+| Public export | Value exports in non-test, non-`.d.ts` files already in the TypeScript artifact: `export function` / `class` / `const` / `let` / `var` / `enum`, `export default`, `export { name }`, `export { name } from`. Name for default is `"default"`. |
 | Skip | Type-only (`export type`, `export interface`, `export { type X }`). `export *` / `export * as ns`. `export =`. Ambient `.d.ts`. Exports in test paths. |
-| Test path (not configurable in v1) | File is in the language pipeline, and basename matches `*.test.*` / `*.spec.*`, or a path segment is `__tests__`. |
-| Reference | Test-file import whose specifier **resolves relatively** (`.ts` / `.tsx` / `.mts` / `.cts` + `index`) to the exporting file in `getSources()`, and the import binds that export name (named) or is a default import (`default`). `import *` does not satisfy named exports. Bare specifiers / dynamic `import()` do not count in v1. |
+| Test path (not configurable in v1) | File is in the TypeScript artifact, and basename matches `*.test.*` / `*.spec.*`, or a path segment is `__tests__`. |
+| Reference | Test-file import whose specifier **resolves relatively** (`.ts` / `.tsx` / `.mts` / `.cts` + `index`) to the exporting file in `getArtifact("typescript").sources`, and the import binds that export name (named) or is a default import (`default`). `import *` does not satisfy named exports. Bare specifiers / dynamic `import()` do not count in v1. |
 | Barrel + source | If both `impl.ts` (`export const x`) and `barrel.ts` (`export { x } from "./impl"`) are in the language set, a test import from the barrel satisfies **only** the barrel export, not impl’s own public export. Each public surface needs its own test reference. |
-| Scope | Include/exclude only. No index. **Tests must not be excluded** or every export fails. This rule only sees files in the language pipeline; a default/global `exclude` of `**/*.test.*` / `**/*.spec.*` wipes the reference sources. Production excludes (`**/generated/**`, `**/dist/**`) are fine. Recommended and example configs keep tests in the set. |
+| Scope | Include/exclude only. No index. **Tests must not be excluded** or every export fails. This rule only sees files in the TypeScript artifact; a default/global `exclude` of `**/*.test.*` / `**/*.spec.*` wipes the reference sources. Production excludes (`**/generated/**`, `**/dist/**`) are fine. Recommended and example configs keep tests in the set. |
 | Violation | `ruleId` `ts/public-exports-tested`; location on the export; message names the export and file; suggestion: import it from a test. |
 | Recommended | `configs.recommended.rules["ts/public-exports-tested"] = "error"`. Install does **not** apply recommended (locked #2 / #4). |
 
@@ -371,7 +349,7 @@ export default defineConfig({
 
 `defineConfig` performs both type-level and runtime validation.
 
-**Do not exclude test paths** (`**/*.test.*`, `**/*.spec.*`, `__tests__/**`) when `ts/public-exports-tested` is enabled. The rule only sees files in the language pipeline; wiping tests from the set makes every public export fail. Keep tests in `include`. Default exclude is `node_modules` and `dist` only.
+**Do not exclude test paths** (`**/*.test.*`, `**/*.spec.*`, `__tests__/**`) when `ts/public-exports-tested` is enabled. The rule only sees files in the TypeScript artifact; wiping tests from the set makes every public export fail. Keep tests in `include`. Default exclude is `node_modules` and `dist` only.
 
 ## 6. MCP server
 

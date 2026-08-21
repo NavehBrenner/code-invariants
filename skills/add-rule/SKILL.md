@@ -17,12 +17,13 @@ Add **one** rule to an existing plugin, with fixtures and tests.
 ## Steps
 
 1. Confirm the rule belongs in this plugin (language baseline vs framework vs architecture). Do **not** add import-boundary / layers / no-deep-import / cycle / path-ban rules to `@code-invariants/typescript` (SPECS locked #7). Do **not** add token/class allowlists to `@code-invariants/react` (R3 → tailwind/DS). Do not implement backlog rows from [docs/rulesets/react.md](../../docs/rulesets/react.md) unless the task asks for that rule.
-2. Implement `Rule` with **no default `kind`**:
-   - `meta.kind: "language"` **or** `"project"` (required)
-   - Language: set `meta.languages` (non-empty, e.g. `["typescript"]`); `create` uses `LanguageRuleContext` (`getProject` / `getSources` / `getSource` / `getFilenames`). Same idea on two languages ⇒ two language rules.
-    - Project: workspace-level, **not** ts-morph `Project`. `create` uses only `ProjectRuleContext` (`getCwd` / `getFiles` / `report`, and `getArtifact(id)` only if `meta.requires` lists `id`). Do **not** call language AST APIs or spawn CLIs. A plugin `provides.build` **may** spawn tools; the rule must not.
-    - `meta.docs.description` (and url if docs exist)
-    - No filesystem or CLI side channels from the rule
+2. Implement a single `Rule` / `RuleContext` (no `meta.kind`):
+   - Optional `meta.requires: string[]` (language AST id = language name, e.g. `["typescript"]`; dry: `["dupehound"]`)
+   - `create` uses `id` / `options` / `report` / `getCwd` / `getFiles` / `getArtifact(id)` (only ids in `requires`; else exit 2)
+   - Same idea on two languages ⇒ two rules (convention, not `meta.kind`); each requires that language’s artifact
+   - Do **not** spawn CLIs from the rule. A plugin `provides.build` **may** spawn tools; plugins must not `provides` a language id
+   - `meta.docs.description` (and url if docs exist)
+   - No filesystem or CLI side channels from the rule
 3. Add fixtures:
    - **valid** samples that must produce zero violations
    - **invalid** samples that must produce the expected `ruleId` and clear messages

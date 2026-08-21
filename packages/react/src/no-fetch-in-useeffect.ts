@@ -1,4 +1,4 @@
-import type { LanguageRule, LanguageRuleContext } from "code-invariants";
+import type { ParsedProject, Rule, RuleContext } from "code-invariants";
 import { Node, type SourceFile } from "ts-morph";
 import {
   collectHttpClientBindings,
@@ -15,22 +15,22 @@ import {
 const SUGGESTION =
   "Load this data with TanStack Query, SWR, a route loader, or an RSC fetch — not inside useEffect.";
 
-export const noFetchInUseEffect: LanguageRule = {
+export const noFetchInUseEffect: Rule = {
   meta: {
-    kind: "language",
-    languages: ["typescript"],
+    requires: ["typescript"],
     docs: {
       description: "Do not kick off HTTP data loading inside useEffect or useLayoutEffect.",
     },
   },
   create(context) {
-    for (const [abs, unit] of context.getSources()) {
+    const parsed = context.getArtifact("typescript") as ParsedProject;
+    for (const [abs, unit] of parsed.sources) {
       scanFile(unit as SourceFile, abs, context);
     }
   },
 };
 
-function scanFile(sf: SourceFile, file: string, context: LanguageRuleContext): void {
+function scanFile(sf: SourceFile, file: string, context: RuleContext): void {
   const { effects, namespaces } = collectReactEffectBindings(sf);
   if (effects.size === 0 && namespaces.size === 0) {
     return;
@@ -55,7 +55,7 @@ function scanEffectCallback(
   file: string,
   clients: Set<string>,
   localFetch: boolean,
-  context: LanguageRuleContext,
+  context: RuleContext,
 ): void {
   const body =
     Node.isArrowFunction(callback) || Node.isFunctionExpression(callback)

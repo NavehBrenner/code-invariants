@@ -1,4 +1,4 @@
-import type { LanguageRule, LanguageRuleContext } from "code-invariants";
+import type { ParsedProject, Rule, RuleContext } from "code-invariants";
 import { Node, type SourceFile } from "ts-morph";
 import {
   collectQueryHookBindings,
@@ -18,22 +18,22 @@ type Facts = {
   error: Set<string>;
 };
 
-export const queryErrorHandled: LanguageRule = {
+export const queryErrorHandled: Rule = {
   meta: {
-    kind: "language",
-    languages: ["typescript"],
+    requires: ["typescript"],
     docs: {
       description: "Every TanStack useQuery / useInfiniteQuery usage must handle errors.",
     },
   },
   create(context) {
-    for (const [abs, unit] of context.getSources()) {
+    const parsed = context.getArtifact("typescript") as ParsedProject;
+    for (const [abs, unit] of parsed.sources) {
       scanFile(unit as SourceFile, abs, context);
     }
   },
 };
 
-function scanFile(sf: SourceFile, file: string, context: LanguageRuleContext): void {
+function scanFile(sf: SourceFile, file: string, context: RuleContext): void {
   const { hooks, namespaces } = collectQueryHookBindings(sf);
   if (hooks.size === 0 && namespaces.size === 0) {
     return;

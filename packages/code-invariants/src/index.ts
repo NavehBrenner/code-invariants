@@ -33,60 +33,23 @@ export type JSONSchema = Record<string, unknown>;
  */
 export type SourceUnit = unknown;
 
-export type RuleKind = "language" | "project";
-
 export interface RuleDocs {
   description: string;
   url?: string;
 }
 
-export interface RuleMetaBase {
+export interface RuleMeta {
   docs: RuleDocs;
   schema?: JSONSchema;
   fixable?: "code" | "whitespace";
-}
-
-export interface LanguageRuleMeta extends RuleMetaBase {
-  kind: "language";
-  /** Required, non-empty. Same product idea on two languages ⇒ two rules. */
-  languages: string[];
-}
-
-/**
- * Workspace-level rule. `kind: "project"` is **not** a ts-morph `Project` —
- * language rules use `getProject()` for that.
- */
-export interface ProjectRuleMeta extends RuleMetaBase {
-  kind: "project";
   /**
-   * Artifact ids this rule needs (e.g. `"dupehound"`). Engine builds each id
-   * once via a plugin `provides` entry. Not embeddings; not a generic `"index"`.
+   * Artifact ids this rule needs (e.g. `"typescript"`, `"dupehound"`).
+   * Engine builds each id once. Language AST id = language name.
    */
   requires?: string[];
 }
 
-export interface LanguageRuleContext {
-  id: string;
-  /** Already validated against `meta.schema`. */
-  options: unknown;
-  report(violation: Omit<Violation, "ruleId">): void;
-  /** The pipeline language for this invocation. */
-  language: string;
-  /** Native project for **this** language only (ts-morph `Project` for TypeScript). */
-  getProject(): unknown;
-  /** All parsed units for this language run (same Map instance for every rule). */
-  getSources(): ReadonlyMap<string, SourceUnit>;
-  /** Display paths under check (stable order). */
-  getFilenames(): readonly string[];
-  /** Lookup one unit by display or absolute path; undefined if not in the run. */
-  getSource(filename: string): SourceUnit | undefined;
-}
-
-/**
- * Workspace-level context. No language AST APIs (`getProject` / `getSources`).
- * `kind: "project"` ≠ `getProject()`.
- */
-export interface ProjectRuleContext {
+export interface RuleContext {
   id: string;
   /** Already validated against `meta.schema`. */
   options: unknown;
@@ -95,7 +58,7 @@ export interface ProjectRuleContext {
   /** Workspace paths under include/exclude (display paths, stable order). */
   getFiles(): readonly string[];
   /**
-   * Project artifact built for this run. Only ids listed in `meta.requires`
+   * Artifact built for this run. Only ids listed in `meta.requires`
    * may be requested; others get an exit-2 error.
    */
   getArtifact(id: string): unknown;
@@ -118,26 +81,14 @@ export interface ArtifactProvider {
 /** Returned by `create` when a rule wants per-node visiting instead of a one-shot pass. */
 export type RuleListener = Record<string, (node: unknown) => void>;
 
-export interface LanguageRule {
-  meta: LanguageRuleMeta;
+export interface Rule {
+  meta: RuleMeta;
   /**
-   * Once per enabled rule per language. `void`, not `undefined`: a `create`
+   * Once per enabled rule. `void`, not `undefined`: a `create`
    * with no return statement must type-check.
    */
-  create(context: LanguageRuleContext): void | RuleListener;
+  create(context: RuleContext): void | RuleListener;
 }
-
-export interface ProjectRule {
-  meta: ProjectRuleMeta;
-  /**
-   * Once per enabled workspace rule. `void`, not `undefined`: a `create`
-   * with no return statement must type-check.
-   */
-  create(context: ProjectRuleContext): void | RuleListener;
-}
-
-/** Discriminated on `meta.kind`. No default — missing/invalid kind is an error. */
-export type Rule = LanguageRule | ProjectRule;
 
 export interface UserConfig {
   languages: string[];
@@ -152,8 +103,9 @@ export interface Plugin {
   version?: string;
   rules?: Record<string, Rule>;
   /**
-   * Project artifacts this plugin can build. Engine unions `requires` from
-   * enabled project rules, invokes matching providers once, and caches results.
+   * Non-language artifacts this plugin can build. Language AST ids are
+   * reserved for core frontends. Engine unions `requires` from enabled
+   * rules, invokes matching providers once, and caches results.
    */
   provides?: Record<string, ArtifactProvider>;
   configs?: {
