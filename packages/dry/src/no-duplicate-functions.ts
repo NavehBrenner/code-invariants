@@ -1,7 +1,7 @@
-import type { Rule, Violation } from "code-invariants";
+import { defineRule, type Violation } from "code-invariants";
 import type { DupehoundCluster, DupehoundIndex } from "./dupehound.ts";
 
-export const noDuplicateFunctions: Rule = {
+export const noDuplicateFunctions = defineRule({
   meta: {
     requires: ["dupehound"],
     docs: {
@@ -10,12 +10,12 @@ export const noDuplicateFunctions: Rule = {
     },
   },
   create(context) {
-    const index = context.getArtifact("dupehound") as DupehoundIndex;
+    const index = context.getArtifact("dupehound");
     for (const item of reportsFromIndex(index)) {
       context.report(item);
     }
   },
-};
+});
 
 export function reportsFromIndex(index: DupehoundIndex): Omit<Violation, "ruleId">[] {
   const reports: Omit<Violation, "ruleId">[] = [];

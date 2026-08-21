@@ -1,5 +1,5 @@
 import { dirname, extname, join, resolve } from "node:path";
-import type { ParsedProject, Range, Rule, RuleContext } from "code-invariants";
+import { defineRule, type Range, type RuleContext } from "code-invariants";
 import { type ExportDeclaration, Node, type SourceFile, SyntaxKind } from "ts-morph";
 
 const TS_EXTS = [".ts", ".tsx", ".mts", ".cts"] as const;
@@ -13,7 +13,7 @@ type PublicExport = {
   range: Range;
 };
 
-export const publicExportsTested: Rule = {
+export const publicExportsTested = defineRule({
   meta: {
     requires: ["typescript"],
     docs: {
@@ -22,7 +22,7 @@ export const publicExportsTested: Rule = {
     },
   },
   create(context) {
-    const sources = (context.getArtifact("typescript") as ParsedProject).sources;
+    const sources = context.getArtifact("typescript").sources;
     const displayByAbs = mapDisplayPaths(context, sources);
     const referenced = new Set<string>();
     const exported: PublicExport[] = [];
@@ -55,7 +55,7 @@ export const publicExportsTested: Rule = {
       });
     }
   },
-};
+});
 
 function isTestPath(filePath: string): boolean {
   const normalized = posix(filePath);
@@ -71,7 +71,7 @@ function isDeclarationFile(filePath: string): boolean {
 }
 
 function mapDisplayPaths(
-  context: RuleContext,
+  context: Pick<RuleContext, "getCwd" | "getFiles">,
   sources: ReadonlyMap<string, unknown>,
 ): Map<string, string> {
   const cwd = context.getCwd();

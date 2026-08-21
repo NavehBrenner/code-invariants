@@ -3,7 +3,7 @@
 Honest catalog for **`@code-invariants/dry`** (`Plugin.name: "dry"`).  
 This is the implementation list for this plugin. Installing the plugin does **not** enable its rules. `configs.recommended` sets `dry/no-duplicate-functions` to `"error"` for users who opt into that preset.
 
-The plugin **provides** artifact `"dupehound"` (structural fingerprints via [dupehound](https://github.com/Rafaelpta/dupehound)). Core only orchestrates a single `requires` → build once → `getArtifact` loop (language ASTs are artifacts too). We do **not** re-own the fingerprinting algorithm. Embeddings / Slopo-style semantic near-dupes and TypeScript interface/type-shape matching are **not** this plugin.
+The plugin **provides** artifact `"dupehound"` (structural fingerprints via [dupehound](https://github.com/Rafaelpta/dupehound)) on the same provider map as core language seeds. Core only orchestrates `requires` → build once → `getArtifact`. We do **not** re-own the fingerprinting algorithm. Embeddings / Slopo-style semantic near-dupes and TypeScript interface/type-shape matching are **not** this plugin.
 
 ## Implemented
 
@@ -13,7 +13,7 @@ The plugin **provides** artifact `"dupehound"` (structural fingerprints via [dup
 
 Behavior is locked in [SPECS.md](../SPECS.md) §3 R4. Summary:
 
-- **Rule:** `requires: ["dupehound"]`. Uses `getCwd`, `getFiles`, `getArtifact("dupehound")`, `report`. The **rule** does not spawn CLIs; `provides.dupehound.build` may.
+- **Rule:** `defineRule` with `requires: ["dupehound"]`. Uses `getCwd`, `getFiles`, `getArtifact("dupehound")` (`DupehoundIndex` via `ArtifactMap`, no cast), `report`. The **rule** does not spawn CLIs; `provides.dupehound.build` may.
 - **Engine:** when this rule is enabled, core invokes dry’s `dupehound` provider once (`dupehound scan --json --exclude-tests`) and caches the result. Pin **v0.1.2**. Structural fingerprints (tree-sitter + winnowing), not embeddings.
 - **Unit:** whatever function-likes dupehound extracts (top-level, methods, arrows / `const` function-likes, `<anonymous>`). Dupehound does **not** detect TS interface / type-alias / whole-class clones.
 - **Skip:** tests (`--exclude-tests` + path rules); generated (dupehound defaults such as `*.gen.ts` / vendor / `@generated`); files outside workspace include (post-filter). Do **not** add `**/*.test.*` to the global default exclude — `ts/public-exports-tested` needs tests in the TypeScript artifact.

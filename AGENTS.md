@@ -31,6 +31,8 @@ Do **not** invent import-lint / cycle / path-ban rules or a long TypeScript cata
 - Dogfood: once `code-invariants check` exists, run it on this repo.
 - Core remains **free of generative LLM API keys**; embeddings only for optional semantic DRY.
 
+Prefer **verbose names** (`artifacts`, not `arts`; `artifactBuildContext`, not `abc`). Shorthands only if the full name would make a variable/function identifier **longer than 20 characters**. If a shorthand is used under that rule, put a **comment line immediately above the declaration** with the full verbose intended name.
+
 Code style and TypeScript hygiene will be enforced by the tool itself as it matures. Do not expand agent docs with lint rule lists.
 
 ## Working through GitHub (`/oc`)

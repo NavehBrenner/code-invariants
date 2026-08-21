@@ -11,8 +11,8 @@ Behavior tables are locked in [SPECS.md](../SPECS.md) §3.
 
 | ID | Intent | Default in recommended |
 |----|--------|------------------------|
-| `react/no-fetch-in-useeffect` | Do not kick off HTTP data loading inside `useEffect` / `useLayoutEffect`. `requires: ["typescript"]` | `error` |
-| `react/query-error-handled` | TanStack `useQuery` / `useInfiniteQuery` must handle errors (structural R1-lite). `requires: ["typescript"]` | `error` |
+| `react/no-fetch-in-useeffect` | Do not kick off HTTP data loading inside `useEffect` / `useLayoutEffect`. `defineRule` / `requires: ["typescript"]` | `error` |
+| `react/query-error-handled` | TanStack `useQuery` / `useInfiniteQuery` must handle errors (structural R1-lite). `defineRule` / `requires: ["typescript"]` | `error` |
 
 ### `react/no-fetch-in-useeffect`
 

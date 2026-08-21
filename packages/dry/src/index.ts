@@ -6,7 +6,7 @@ const plugin: Plugin = {
   name: "dry",
   provides: {
     dupehound: {
-      build: (ctx) => buildDupehoundIndex(ctx),
+      build: (context) => buildDupehoundIndex(context),
     },
   },
   rules: {

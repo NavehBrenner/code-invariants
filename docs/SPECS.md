@@ -47,14 +47,16 @@ These decisions are considered stable unless a major new constraint appears:
 
    **Overlap family:** `import-boundary` / layers / no-import-from / no-deep-import / max-relative-depth are one policy family. The v1 TypeScript plugin catalogs **none** of them unless a future WP proves a unique agent-facing gap. Prefer configuring Biome + dependency-cruiser over reimplementation.
 
-8. **One rule type / one engine loop**  
-   No unified cross-language AST. Same product idea on two languages ⇒ **two rules** (convention, not `meta.kind`), each `requires` that language’s artifact id. There is a single `Rule` / `RuleContext`. Optional `meta.requires: string[]` names artifacts. Language AST id = language name (`"typescript"` → today’s `ParsedProject`). `config.languages` is an **allowlist**: requiring a language not listed → exit 2.
+8. **One provider map / one engine loop**  
+   No unified cross-language AST. Same product idea on two languages ⇒ **two rules** (convention, not `meta.kind`), each `requires` that language’s artifact id. There is a single `Rule` / `RuleContext`. Optional `meta.requires: string[]` names artifacts. Language AST id = language name (`"typescript"` → today’s `ParsedProject`). In-repo / TypeScript plugin authors use `defineRule` so `getArtifact(id)` is typed from `ArtifactMap` (no `as ParsedProject` / `as DupehoundIndex`). Runtime `getArtifact(id: string): unknown` stays for dynamic `import()`.
 
-   **Who provides:** core wraps language frontends as providers keyed by language name. Plugins `provides` **non-language artifacts only** (`dupehound` stays in `@code-invariants/dry`). Language ids are reserved (plugin `provides.typescript` → exit 2).
+   **Who provides:** one map. Core **seeds default providers** from frontends (`"typescript"` → `ParsedProject` wrapped as `ArtifactProvider.build`). Plugins add `provides` the same way (`dupehound` stays in `@code-invariants/dry`). Packaging (who registers) is not a second build path. Duplicate provider id (core already registered `typescript`, plugin `provides.typescript`) → exit 2, no override; message names both owners (`core` + plugin name). There is **no** reserved-id category: a plugin *may* `provides.python` if core did not seed `python`.
 
-   **Engine:** resolve enabled rules → validate `requires` → union ids → **build each once** (core language **or** plugin `provides`) → `create` every rule once with the same context. One include/exclude file pass; language `build` filters extensions (TS: `.ts`/`.tsx`/`.mts`/`.cts`). Empty sources after filter is success, not an error. No language vs project pipelines.
+   **Engine:** collect all providers into one map → union `requires` from enabled rules → **build each id once** (`await provider.build(context)`) → `create` every rule once with the same context. One include/exclude file pass; extension filtering lives **inside** the typescript provider’s `build` (`.ts`/`.tsx`/`.mts`/`.cts`). Empty sources after filter is success, not an error. `LanguageFrontend` stays the parse protocol behind the core typescript provider (locked #3) — do not collapse it into `ArtifactProvider`.
 
-   **Fail closed (exit 2, name rule ids):** invalid `requires`; language id not in `config.languages`; language in allowlist but no frontend; missing plugin provider; duplicate provider id; reserved language id on plugin `provides`; build throw; `getArtifact` for an id not in that rule’s `requires`. Do not silently skip.
+   **`config.languages`:** allowlist/policy **only** when the required id is a **core-seeded language provider**. `requires: ["typescript"]` with `languages: ["python"]` → allowlist error (typescript *is* seeded). No frontend for an id (e.g. `python`) → nothing seeded → **missing provider**.
+
+   **Fail closed (exit 2, name rule ids):** invalid `requires`; core-seeded language id not in `config.languages`; missing provider; duplicate provider id; build throw; `getArtifact` for an id not in that rule’s `requires`. Do not silently skip.
 
    Not a vector store. `code-invariants index` CLI stays unimplemented. Dupehound (structural fingerprints / winnowing, **not** embeddings) is provided by `@code-invariants/dry` as artifact id `"dupehound"`.
 
@@ -82,17 +84,18 @@ These decisions are considered stable unless a major new constraint appears:
 ┌────────────────────────────▼────────────────────────────────┐
 │                     Rule Engine (core)                      │
 │  - loads plugins                                            │
+│  - one provider map (core language seeds + plugin provides) │
 │  - unions requires; builds each artifact once               │
 │  - one create() loop; collects violations                   │
-└──────────────┬──────────────────────────────┬───────────────┘
-               │                              │
-      ┌─────────▼─────────┐          ┌─────────▼─────────┐
-      │  Language artifacts│          │  Plugin artifacts │
-      │  (core frontends)  │          │  (plugin provides)│
-      │  id = language name│          │  e.g. dupehound   │
-      │  "typescript" →    │          │  in @…/dry        │
-      │  ParsedProject     │          │  embeddings later │
-      └────────────────────┘          └───────────────────┘
+└────────────────────────────┬────────────────────────────────┘
+                             │
+              ┌──────────────▼──────────────┐
+              │   Artifact providers        │
+              │   core: "typescript" →      │
+              │     ParsedProject           │
+              │   dry: "dupehound"          │
+              │   embeddings later          │
+              └─────────────────────────────┘
 ```
 
 ### Core concepts
@@ -106,7 +109,7 @@ These decisions are considered stable unless a major new constraint appears:
   Product rules in this repo (`ts/public-exports-tested`, `react/no-fetch-in-useeffect`, `react/query-error-handled`, `dry/no-duplicate-functions`) **must** use concrete suggestions, not the sentinel. CLI prints a `suggestion:` line unless the value is exactly `NO_SUGGESTION`. `report()` fills the sentinel at runtime if the field is missing (JS plugins keep working).
 - **Frontend**: Language-specific AST / symbol provider that implements the frontend protocol.
 - **Plugin**: A package that exports one or more rules (and optionally recommended configs and `provides` artifact builders) conforming to the plugin contract.
-- **Artifact**: Opaque value built once per check when an enabled rule `requires` its id. Language AST id = language name (`"typescript"` → `ParsedProject` from the core frontend). `@code-invariants/dry` provides `"dupehound"` (structural fingerprints). Vector / embedding index is still future.
+- **Artifact**: Opaque value built once per check when an enabled rule `requires` its id. One provider map: core seeds language defaults (`"typescript"` → `ParsedProject`); plugins add `provides` (`"dupehound"` in `@code-invariants/dry`). Vector / embedding index is still future.
 
 ## 2. Plugin contract (explicit)
 
@@ -124,7 +127,7 @@ export interface Plugin {
 }
 
 export interface ArtifactProvider {
-  build(ctx: ArtifactBuildContext): Promise<unknown> | unknown;
+  build(context: ArtifactBuildContext): Promise<unknown> | unknown;
 }
 
 export interface ArtifactBuildContext {
@@ -164,11 +167,27 @@ export interface ParsedProject {
   readonly project: unknown;
   readonly sources: ReadonlyMap<string, SourceUnit>;
 }
+
+/** Plugins augment via interface merging. Engine still uses Map<string, unknown>. */
+export interface ArtifactMap {
+  typescript: ParsedProject;
+}
+
+export function defineRule<
+  const Requires extends readonly (keyof ArtifactMap)[] = readonly [],
+>(rule: {
+  meta: Omit<RuleMeta, "requires"> & { requires?: Requires };
+  create(
+    context: Omit<RuleContext, "getArtifact"> & {
+      getArtifact<Id extends Requires[number]>(id: Id): ArtifactMap[Id];
+    },
+  ): void | RuleListener;
+}): Rule;
 ```
 
-`create` is invoked once per enabled rule, not once per file. Rules never touch the filesystem or the CLI; they only receive their context and call `context.report`. Language consumers: `requires: ["typescript"]` and `getArtifact("typescript")` as `ParsedProject` (`.project` / `.sources`). A plugin `provides.build` function **may** spawn tools; rules must not. Plugins must not `provides` a language id. This keeps rules testable and isolatable.
+`create` is invoked once per enabled rule, not once per file. Rules never touch the filesystem or the CLI; they only receive their context and call `context.report`. Language consumers: `requires: ["typescript"]` and `getArtifact("typescript")` (typed as `ParsedProject` via `defineRule`; `.project` / `.sources`). Keep `as SourceFile` (`SourceUnit` stays `unknown` — locked #3). A plugin `provides.build` function **may** spawn tools; rules must not. Duplicate provider id (core already registered `typescript`) fails closed — not a reserved-id category. This keeps rules testable and isolatable.
 
-Invalid `requires`, a required language not in `config.languages`, a language in the allowlist with no frontend, a missing plugin provider, a duplicate or reserved provider id, a build throw, or `getArtifact` for an id not in that rule’s `requires` is an error (exit 2; do not silently skip). The message names the rule id(s).
+Invalid `requires`, a core-seeded language id not in `config.languages`, a missing provider, a duplicate provider id, a build throw, or `getArtifact` for an id not in that rule’s `requires` is an error (exit 2; do not silently skip). The message names the rule id(s). No frontend for an id (e.g. `python`) is a missing provider.
 
 A custom plugin is simply an npm package (or local folder) that exports a `Plugin`. The core discovers it from the `plugins` array in the user’s config. Core never ships a default rule table; a rule exists only if a loaded plugin lists it. Installing `@code-invariants/typescript` (or any plugin) does not enable rules until they appear in `config.rules`. `configs.recommended` is an optional preset the user copies in — the engine does not apply it on install.
 
@@ -179,7 +198,7 @@ A custom plugin is simply an npm package (or local folder) that exports a `Plugi
 ### R1 — Query error handling (`react/query-error-handled`)
 
 Implemented in `@code-invariants/react` as **`react/query-error-handled`**.  
-`requires: ["typescript"]`; read AST from `getArtifact("typescript")`. Structural only — no mandatory DataRegion / helper.
+`defineRule` with `requires: ["typescript"]`; read AST from `getArtifact("typescript")` (`ParsedProject`, no cast). Structural only — no mandatory DataRegion / helper.
 
 **Intent:** Every TanStack `useQuery` (and locked twins) usage must not ignore errors.
 
@@ -200,7 +219,7 @@ Implemented in `@code-invariants/react` as **`react/query-error-handled`**.
 ### `react/no-fetch-in-useeffect`
 
 Implemented in `@code-invariants/react`.  
-`requires: ["typescript"]`; read AST from `getArtifact("typescript")`. Aligns with React’s [You Might Not Need an Effect](https://react.dev/learn/you-might-not-need-an-effect).
+`defineRule` with `requires: ["typescript"]`; read AST from `getArtifact("typescript")` (`ParsedProject`, no cast). Aligns with React’s [You Might Not Need an Effect](https://react.dev/learn/you-might-not-need-an-effect).
 
 **Intent:** Do not kick off HTTP data loading inside `useEffect` / `useLayoutEffect`. Prefer data libraries, route loaders, or RSC.
 
@@ -227,7 +246,7 @@ Implemented in `@code-invariants/react`.
 ### R4 — Structural DRY (`dry/no-duplicate-functions`)
 
 Implemented in `@code-invariants/dry` as **`dry/no-duplicate-functions`**.  
-`requires: ["dupehound"]`. Typed as `Rule`; uses `getCwd`, `getFiles`, `getArtifact`, `report`. The **dry plugin** wraps [dupehound](https://github.com/Rafaelpta/dupehound) `scan --json` in `provides.dupehound.build`; core does not spawn it. We do not reimplement fingerprints.
+`defineRule` with `requires: ["dupehound"]`; `getArtifact("dupehound")` is `DupehoundIndex` via `ArtifactMap` merge (no cast). Uses `getCwd`, `getFiles`, `getArtifact`, `report`. The **dry plugin** wraps [dupehound](https://github.com/Rafaelpta/dupehound) `scan --json` in `provides.dupehound.build`; core does not spawn it. We do not reimplement fingerprints.
 
 **Intent:** No structurally duplicate functions/methods in included non-test, non-generated sources.
 
@@ -251,7 +270,7 @@ See [docs/rulesets/dry.md](./rulesets/dry.md).
 ### R5 — Test presence (static)
 
 Implemented in `@code-invariants/typescript` as **`ts/public-exports-tested`**.  
-`requires: ["typescript"]`; read AST from `getArtifact("typescript")`. Coverage tools are out of scope for this check.
+`defineRule` with `requires: ["typescript"]`; read AST from `getArtifact("typescript")` (`ParsedProject`, no cast). Coverage tools are out of scope for this check.
 
 **Intent:** Every **public** value export in included non-test sources must be referenced at least once from a **test** path.
 

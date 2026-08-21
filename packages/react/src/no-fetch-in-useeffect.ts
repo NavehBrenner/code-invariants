@@ -1,4 +1,4 @@
-import type { ParsedProject, Rule, RuleContext } from "code-invariants";
+import { defineRule, type RuleContext } from "code-invariants";
 import { Node, type SourceFile } from "ts-morph";
 import {
   collectHttpClientBindings,
@@ -15,7 +15,7 @@ import {
 const SUGGESTION =
   "Load this data with TanStack Query, SWR, a route loader, or an RSC fetch — not inside useEffect.";
 
-export const noFetchInUseEffect: Rule = {
+export const noFetchInUseEffect = defineRule({
   meta: {
     requires: ["typescript"],
     docs: {
@@ -23,14 +23,14 @@ export const noFetchInUseEffect: Rule = {
     },
   },
   create(context) {
-    const parsed = context.getArtifact("typescript") as ParsedProject;
+    const parsed = context.getArtifact("typescript");
     for (const [abs, unit] of parsed.sources) {
       scanFile(unit as SourceFile, abs, context);
     }
   },
-};
+});
 
-function scanFile(sf: SourceFile, file: string, context: RuleContext): void {
+function scanFile(sf: SourceFile, file: string, context: Pick<RuleContext, "report">): void {
   const { effects, namespaces } = collectReactEffectBindings(sf);
   if (effects.size === 0 && namespaces.size === 0) {
     return;
@@ -55,7 +55,7 @@ function scanEffectCallback(
   file: string,
   clients: Set<string>,
   localFetch: boolean,
-  context: RuleContext,
+  context: Pick<RuleContext, "report">,
 ): void {
   const body =
     Node.isArrowFunction(callback) || Node.isFunctionExpression(callback)

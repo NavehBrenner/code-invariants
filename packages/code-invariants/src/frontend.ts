@@ -1,5 +1,5 @@
-import type { LanguageFrontend } from "./index.ts";
-import { createTypeScriptFrontend } from "./typescript-frontend.ts";
+import type { ArtifactProvider, LanguageFrontend } from "./index.ts";
+import { createTypeScriptFrontend, createTypeScriptProvider } from "./typescript-frontend.ts";
 
 export type { LanguageFrontend, ParsedProject } from "./index.ts";
 
@@ -12,4 +12,8 @@ export function createFrontend(language: string): LanguageFrontend | undefined {
     return createTypeScriptFrontend();
   }
   return undefined;
+}
+
+export function seedLanguageProviders(): Map<string, ArtifactProvider> {
+  return new Map([["typescript", createTypeScriptProvider()]]);
 }

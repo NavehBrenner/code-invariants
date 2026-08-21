@@ -387,7 +387,7 @@ test("requires typescript when not in config.languages exits 2", async () => {
   expect(errors.join("\n")).toMatch(/fixture\/ping/);
 });
 
-test("requires python with no frontend exits 2", async () => {
+test("requires python with no frontend exits 2 as missing provider", async () => {
   const dir = await writeTree({
     "plugin.mjs": pluginWith(`{ requires: ["python"], docs: { description: "needs python" } }`),
     "code-invariants.config.json": JSON.stringify({
@@ -399,7 +399,10 @@ test("requires python with no frontend exits 2", async () => {
   });
   const errors: string[] = [];
   expect(await check(dir, silent, (m) => errors.push(String(m)))).toBe(2);
-  expect(errors.join("\n")).toMatch(/No frontend for python \(required by fixture\/ping\)/);
+  expect(errors.join("\n")).toMatch(/No plugin provides artifact "python"/);
+  expect(errors.join("\n")).toMatch(/fixture\/ping/);
+  expect(errors.join("\n")).not.toMatch(/No frontend/);
+  expect(errors.join("\n")).not.toMatch(/reserved/);
 });
 
 test("invalid requires exits 2", async () => {
@@ -418,9 +421,9 @@ export default {
   name: "fixture",
   provides: {
     fake: {
-      async build(ctx) {
+      async build(context) {
         builds += 1;
-        return { builds, files: ctx.files, requiredBy: ctx.requiredBy };
+        return { builds, files: context.files, requiredBy: context.requiredBy };
       },
     },
   },
@@ -428,12 +431,12 @@ export default {
     alpha: {
       meta: { requires: ["fake"], docs: { description: "reads fake" } },
       create(context) {
-        const art = context.getArtifact("fake");
+        const artifact = context.getArtifact("fake");
         context.report({
           severity: "error",
           file: context.getFiles()[0],
           range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
-          message: \`alpha builds=\${art.builds} by=\${art.requiredBy.join(",")}\`,
+          message: \`alpha builds=\${artifact.builds} by=\${artifact.requiredBy.join(",")}\`,
           suggestion: "n/a",
         });
       },
@@ -441,12 +444,12 @@ export default {
     beta: {
       meta: { requires: ["fake"], docs: { description: "reads fake too" } },
       create(context) {
-        const art = context.getArtifact("fake");
+        const artifact = context.getArtifact("fake");
         context.report({
           severity: "error",
           file: context.getFiles()[0],
           range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
-          message: \`beta builds=\${art.builds}\`,
+          message: \`beta builds=\${artifact.builds}\`,
           suggestion: "n/a",
         });
       },
@@ -539,7 +542,31 @@ test("duplicate artifact id exits 2", async () => {
   });
   const errors: string[] = [];
   expect(await check(dir, silent, (m) => errors.push(String(m)))).toBe(2);
-  expect(errors.join("\n")).toMatch(/Artifact "fake" is provided by more than one plugin/);
+  expect(errors.join("\n")).toMatch(/Artifact "fake" is provided by more than one owner/);
+});
+
+test("plugin provides.typescript while core seeded it exits 2 as duplicate", async () => {
+  const dir = await writeTree({
+    "plugin.mjs": `export default {
+  name: "fixture",
+  provides: { typescript: { build() { return {}; } } },
+  rules: {
+    ping: {
+      meta: { requires: ["typescript"], docs: { description: "needs ts" } },
+      create() {},
+    },
+  },
+};
+`,
+    "code-invariants.config.json": config({ "fixture/ping": "error" }),
+    "src/hello.ts": "export const n = 1;\n",
+  });
+  const errors: string[] = [];
+  expect(await check(dir, silent, (m) => errors.push(String(m)))).toBe(2);
+  expect(errors.join("\n")).toMatch(
+    /Artifact "typescript" is provided by more than one owner \(core, fixture\)/,
+  );
+  expect(errors.join("\n")).not.toMatch(/reserved/);
 });
 
 test("getArtifact without require exits 2", async () => {
@@ -613,12 +640,12 @@ export default {
     plug: {
       meta: { requires: ["fake"], docs: { description: "reads fake" } },
       create(context) {
-        const art = context.getArtifact("fake");
+        const artifact = context.getArtifact("fake");
         context.report({
           severity: "error",
           file: context.getFiles()[0],
           range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
-          message: \`plug builds=\${art.fakeBuilds}\`,
+          message: \`plug builds=\${artifact.fakeBuilds}\`,
           suggestion: "n/a",
         });
       },
@@ -627,12 +654,12 @@ export default {
       meta: { requires: ["typescript", "fake"], docs: { description: "reads both" } },
       create(context) {
         const parsed = context.getArtifact("typescript");
-        const art = context.getArtifact("fake");
+        const artifact = context.getArtifact("fake");
         context.report({
           severity: "error",
           file: context.getFiles()[0],
           range: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
-          message: \`both sources=\${parsed.sources.size} builds=\${art.fakeBuilds}\`,
+          message: \`both sources=\${parsed.sources.size} builds=\${artifact.fakeBuilds}\`,
           suggestion: "n/a",
         });
       },

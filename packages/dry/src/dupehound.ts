@@ -36,6 +36,12 @@ export type DupehoundIndex = {
   clusters: readonly DupehoundCluster[];
 };
 
+declare module "code-invariants" {
+  interface ArtifactMap {
+    dupehound: DupehoundIndex;
+  }
+}
+
 export type BuildDupehoundOptions = ArtifactBuildContext & {
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;

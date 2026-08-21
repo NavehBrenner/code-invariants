@@ -44,7 +44,7 @@ export interface RuleMeta {
   fixable?: "code" | "whitespace";
   /**
    * Artifact ids this rule needs (e.g. `"typescript"`, `"dupehound"`).
-   * Engine builds each id once. Language AST id = language name.
+   * Engine builds each id once from the single provider map.
    */
   requires?: string[];
 }
@@ -75,7 +75,7 @@ export interface ArtifactBuildContext {
 }
 
 export interface ArtifactProvider {
-  build(ctx: ArtifactBuildContext): Promise<unknown> | unknown;
+  build(context: ArtifactBuildContext): Promise<unknown> | unknown;
 }
 
 /** Returned by `create` when a rule wants per-node visiting instead of a one-shot pass. */
@@ -103,8 +103,9 @@ export interface Plugin {
   version?: string;
   rules?: Record<string, Rule>;
   /**
-   * Non-language artifacts this plugin can build. Language AST ids are
-   * reserved for core frontends. Engine unions `requires` from enabled
+   * Artifact providers merged into the same map as core language seeds.
+   * Duplicate ids (including a plugin colliding with a core-seeded
+   * language provider) fail closed. Engine unions `requires` from enabled
    * rules, invokes matching providers once, and caches results.
    */
   provides?: Record<string, ArtifactProvider>;
@@ -127,4 +128,12 @@ export interface LanguageFrontend {
   parseFiles(absolutePaths: readonly string[]): ParsedProject;
 }
 
+/**
+ * Plugins augment via interface merging. Engine still uses Map<string, unknown>.
+ */
+export interface ArtifactMap {
+  typescript: ParsedProject;
+}
+
 export { defineConfig } from "./config.ts";
+export { defineRule } from "./define-rule.ts";

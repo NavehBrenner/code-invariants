@@ -9,7 +9,7 @@ Core has no built-in rule bag. Rules exist only on this plugin’s `rules` map. 
 
 | ID | Intent | Default in recommended |
 |----|--------|------------------------|
-| `ts/public-exports-tested` | Every public value export in included non-test sources is referenced from a test path (static R5-lite; not coverage). `requires: ["typescript"]` | `error` |
+| `ts/public-exports-tested` | Every public value export in included non-test sources is referenced from a test path (static R5-lite; not coverage). `defineRule` / `requires: ["typescript"]` | `error` |
 
 Behavior is locked in [SPECS.md](../SPECS.md) §3 R5. Summary:
 

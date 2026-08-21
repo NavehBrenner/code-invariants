@@ -1,12 +1,11 @@
 import { glob } from "node:fs/promises";
-import { basename, dirname, extname, relative, resolve, sep } from "node:path";
+import { basename, dirname, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { CONFIG_FILENAMES, ConfigError, loadConfig } from "./config.ts";
-import { createFrontend, hasFrontend } from "./frontend.ts";
+import { seedLanguageProviders } from "./frontend.ts";
 import {
   type ArtifactProvider,
   NO_SUGGESTION,
-  type ParsedProject,
   type Plugin,
   type Rule,
   type Severity,
@@ -17,7 +16,6 @@ import {
 const NOTHING_TO_CHECK = "No rules configured — nothing to check.";
 const DEFAULT_INCLUDE = ["**/*.ts", "**/*.tsx", "**/*.mts", "**/*.cts"];
 const DEFAULT_EXCLUDE = ["**/node_modules/**", "**/dist/**"];
-const TS_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
 
 type Enabled = {
   id: string;
@@ -139,8 +137,8 @@ function isPlugin(value: unknown): value is Plugin {
   if (value === null || typeof value !== "object") {
     return false;
   }
-  const rec = value as Record<string, unknown>;
-  return typeof rec.name === "string";
+  const record = value as Record<string, unknown>;
+  return typeof record.name === "string";
 }
 
 function resolveEnabledRules(plugins: Plugin[], rules: Record<string, Severity>): Enabled[] {
@@ -212,12 +210,13 @@ async function buildRequiredArtifacts(
       requiredBy.set(id, list);
     }
   }
-  const providers = collectProviders(plugins, config.languages);
+  const { providers, languageIds } = collectProviders(plugins);
   const artifacts = new Map<string, unknown>();
   for (const [id, rules] of requiredBy) {
-    if (isLanguageArtifact(id, config.languages)) {
-      artifacts.set(id, buildLanguageArtifact(id, rules, config.languages, base));
-      continue;
+    if (languageIds.has(id) && !config.languages.includes(id)) {
+      throw new ConfigError(
+        `Artifact "${id}" is not in config.languages (required by ${rules.join(", ")}).`,
+      );
     }
     const provider = providers.get(id);
     if (provider === undefined) {
@@ -248,44 +247,18 @@ async function buildRequiredArtifacts(
   return artifacts;
 }
 
-function isLanguageArtifact(id: string, configLanguages: string[]): boolean {
-  return hasFrontend(id) || configLanguages.includes(id);
-}
-
-function buildLanguageArtifact(
-  language: string,
-  rules: string[],
-  configLanguages: string[],
-  base: { cwd: string; files: readonly string[] },
-): ParsedProject {
-  if (!configLanguages.includes(language)) {
-    throw new ConfigError(
-      `Artifact "${language}" is not in config.languages (required by ${rules.join(", ")}).`,
-    );
-  }
-  const frontend = createFrontend(language);
-  if (frontend === undefined) {
-    throw new ConfigError(`No frontend for ${language} (required by ${rules.join(", ")}).`);
-  }
-  const absolutePaths = base.files
-    .map((file) => resolve(base.cwd, file))
-    .filter((abs) => languageAccepts(language, abs));
-  return frontend.parseFiles(absolutePaths);
-}
-
-function languageAccepts(language: string, path: string): boolean {
-  if (language === "typescript") {
-    return hasTsExtension(path);
-  }
-  return true;
-}
-
-function collectProviders(
-  plugins: Plugin[],
-  configLanguages: string[],
-): Map<string, ArtifactProvider> {
-  const owners = new Map<string, string>();
+function collectProviders(plugins: Plugin[]): {
+  providers: Map<string, ArtifactProvider>;
+  languageIds: Set<string>;
+} {
   const providers = new Map<string, ArtifactProvider>();
+  const owners = new Map<string, string>();
+  const languageIds = new Set<string>();
+  for (const [id, provider] of seedLanguageProviders()) {
+    providers.set(id, provider);
+    owners.set(id, "core");
+    languageIds.add(id);
+  }
   for (const plugin of plugins) {
     const provides = plugin.provides;
     if (provides === undefined) {
@@ -298,11 +271,6 @@ function collectProviders(
       if (id.length === 0) {
         throw new ConfigError(`Plugin "${plugin.name}" provides an empty artifact id.`);
       }
-      if (isLanguageArtifact(id, configLanguages)) {
-        throw new ConfigError(
-          `Artifact "${id}" is reserved for the language frontend (plugin "${plugin.name}").`,
-        );
-      }
       if (
         provider === null ||
         typeof provider !== "object" ||
@@ -313,14 +281,14 @@ function collectProviders(
       const existing = owners.get(id);
       if (existing !== undefined) {
         throw new ConfigError(
-          `Artifact "${id}" is provided by more than one plugin (${existing}, ${plugin.name}).`,
+          `Artifact "${id}" is provided by more than one owner (${existing}, ${plugin.name}).`,
         );
       }
       owners.set(id, plugin.name);
       providers.set(id, provider as ArtifactProvider);
     }
   }
-  return providers;
+  return { providers, languageIds };
 }
 
 function readArtifact(
@@ -357,10 +325,6 @@ async function listWorkspaceFiles(cwd: string, config: UserConfig): Promise<stri
     }
   }
   return [...found].sort();
-}
-
-function hasTsExtension(path: string): boolean {
-  return TS_EXTENSIONS.has(extname(path));
 }
 
 function isConfigFilename(path: string): boolean {
