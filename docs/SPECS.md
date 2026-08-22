@@ -1,4 +1,4 @@
-# Specifications — code-invariants
+# Specifications — qualety
 
 This document defines the intended architecture, interfaces, and first set of rules so that a coding agent (or human) can implement the system without ambiguity.
 
@@ -9,11 +9,11 @@ These decisions are considered stable unless a major new constraint appears:
 1. **Consumption model**  
    CLI-first (ESLint/Ruff-like). Selective execution is required:
    ```bash
-   code-invariants check
-   code-invariants check --plugin react
-   code-invariants check --rule react/data-region-exhaustive
-   code-invariants check --exclude-plugin dry
-   code-invariants check --diff --plugin react
+   qualety check
+   qualety check --plugin react
+   qualety check --rule react/data-region-exhaustive
+   qualety check --exclude-plugin dry
+   qualety check --diff --plugin react
    ```
    Exit codes 0/1/2. JSON/SARIF output. Optional MCP server as a thin wrapper around the same engine. Official GitHub Action + pre-commit examples.
 
@@ -26,20 +26,20 @@ These decisions are considered stable unless a major new constraint appears:
 4. **Plugins**  
    First-class and user-writable. There is one explicit contract (see § Plugin contract). Plugins can be published as npm packages or loaded from local paths. Agent skills for creating and maintaining plugins are part of the deliverable.  
    **v1 plugin language is TypeScript only.** Plugins are TypeScript/JavaScript packages that export the `Plugin` interface. Python-written plugins may be supported later via the same protocol once a Python frontend exists.  
-    **Core has no built-in rule bag.** Every check is a plugin rule. Core is the engine, default artifact providers, config/CLI, and a generic artifact seam — not a default catalog and **not** a dupehound (or other niche binary) host. Baseline TypeScript rules live in `@code-invariants/typescript` (`Plugin.name: "ts"`). React compositional rules live in `@code-invariants/react` (`Plugin.name: "react"`). Structural DRY lives in `@code-invariants/dry` (`Plugin.name: "dry"`), which **provides** the `dupehound` artifact. Shared/provider-only packages load as **ruleless plugins** (`name` + `provides`, no `rules`) via `plugins[]`. A plugin may ship `configs.recommended`; installing a plugin does **not** enable its rules (locked #2).
+    **Core has no built-in rule bag.** Every check is a plugin rule. Core is the engine, default artifact providers, config/CLI, and a generic artifact seam — not a default catalog and **not** a dupehound (or other niche binary) host. Baseline TypeScript rules live in `@qualety/typescript` (`Plugin.name: "ts"`). React compositional rules live in `@qualety/react` (`Plugin.name: "react"`). Structural DRY lives in `@qualety/dry` (`Plugin.name: "dry"`), which **provides** the `dupehound` artifact. Shared/provider-only packages load as **ruleless plugins** (`name` + `provides`, no `rules`) via `plugins[]`. A plugin may ship `configs.recommended`; installing a plugin does **not** enable its rules (locked #2).
 
 5. **Runtime helpers**  
-   Optional companion packages (e.g. a future official `DataRegion`). Static rules work both with the official helpers and with equivalent structural patterns the user already has. **Helpers are optional; this WP ships none.** TanStack Query detectors live under `@code-invariants/react`, not a separate package.
+   Optional companion packages (e.g. a future official `DataRegion`). Static rules work both with the official helpers and with equivalent structural patterns the user already has. **Helpers are optional; this WP ships none.** TanStack Query detectors live under `@qualety/react`, not a separate package.
 
 6. **Scope of v1**  
    High-quality TypeScript/React engine first. Python (and other languages) later, reusing the same core protocol.
 
 7. **Relationship to classic linters/formatters**  
-   `code-invariants` is the *higher-order* layer. It does **not** wrap, re-implement, or own configuration for Biome, ESLint, Prettier, Oxlint, or Ruff. Users are expected to run a fast linter/formatter of their choice. We may later offer a thin convenience flag that invokes the user’s existing Biome/ESLint config and then runs our rules, but we never own those tools’ configuration or rule sets. Custom plugins that need classic lint/format results should call those tools themselves.
+   `qualety` is the *higher-order* layer. It does **not** wrap, re-implement, or own configuration for Biome, ESLint, Prettier, Oxlint, or Ruff. Users are expected to run a fast linter/formatter of their choice. We may later offer a thin convenience flag that invokes the user’s existing Biome/ESLint config and then runs our rules, but we never own those tools’ configuration or rule sets. Custom plugins that need classic lint/format results should call those tools themselves.
 
     **TypeScript baseline — what we own:** `ts/public-exports-tested` (static R5-lite).
 
-    **React plugin — what we own:** `react/no-fetch-in-useeffect` and `react/query-error-handled` (R1-lite). TanStack stays inside `@code-invariants/react` (detectors only). **R3 semantic tokens → future `@code-invariants/tailwind` (or DS), not react.**
+    **React plugin — what we own:** `react/no-fetch-in-useeffect` and `react/query-error-handled` (R1-lite). TanStack stays inside `@qualety/react` (detectors only). **R3 semantic tokens → future `@qualety/tailwind` (or DS), not react.**
 
     **DRY plugin — what we own:** `dry/no-duplicate-functions` (structural R4 via dupehound). We wrap the dupehound CLI for agent-facing violations and plugin config; we do not re-own its fingerprinting algorithm. Embeddings / Slopo-style semantic near-dupes remain later. Architecture fitness only if we add something ArchUnit / dependency-cruiser do not already cover.
 
@@ -50,13 +50,13 @@ These decisions are considered stable unless a major new constraint appears:
 8. **One provider map / one engine loop**  
     No unified cross-language AST. Same product idea on two languages ⇒ **two rules** (convention, not `meta.kind`), each `requires` that artifact id. There is a single `Rule` / `RuleContext`. Optional `meta.requires: string[]` names artifacts. In-repo / TypeScript plugin authors use `defineRule` (identity) so `getArtifact(id)` is typed from `ArtifactMap` (no `as ParsedProject` / `as DupehoundIndex`). Runtime engine `getArtifact` stays untyped at the `Map<string, unknown>` boundary. Load path is Zod (`pluginSchema` / `ruleSchema` / `artifactProviderSchema`), not hand guards.
 
-   **Who provides:** one map. Start empty → register every `provides` entry from loaded **plugin modules** (collision → exit 2, names **both owners**) → for each id in the **default registry** still missing, fill with `owner: "default"`. Defaults only fill gaps; they never replace a plugin-provided id. A plugin `provides.typescript` **wins** (default skipped for that id). v1 default registry is `as const` with `"typescript"` → today’s `ParsedProject`. `dupehound` stays in `@code-invariants/dry`. Multi-team shared providers load as **ruleless plugins** via `plugins[]`. There is **no** `config.languages` and **no** reserved-id category.
+   **Who provides:** one map. Start empty → register every `provides` entry from loaded **plugin modules** (collision → exit 2, names **both owners**) → for each id in the **default registry** still missing, fill with `owner: "default"`. Defaults only fill gaps; they never replace a plugin-provided id. A plugin `provides.typescript` **wins** (default skipped for that id). v1 default registry is `as const` with `"typescript"` → today’s `ParsedProject`. `dupehound` stays in `@qualety/dry`. Multi-team shared providers load as **ruleless plugins** via `plugins[]`. There is **no** `config.languages` and **no** reserved-id category.
 
    **Engine:** collect all providers into one map → union `requires` from enabled rules → **build each id once** (`await provider.build(context)`) → `create` every rule once with the same context. One include/exclude file pass; extension filtering lives **inside** the typescript provider’s `build` (`.ts`/`.tsx`/`.mts`/`.cts`). Empty sources after filter is success, not an error.
 
    **Fail closed (exit 2, name rule ids):** malformed plugin / rule / provider at load; invalid `requires`; missing provider (provider-neutral copy, not “No plugin provides…”); duplicate provider id; build throw; `getArtifact` for an id not in that rule’s `requires`. Do not silently skip.
 
-   Not a vector store. `code-invariants index` CLI stays unimplemented. Dupehound (structural fingerprints / winnowing, **not** embeddings) is provided by `@code-invariants/dry` as artifact id `"dupehound"`.
+   Not a vector store. `qualety index` CLI stays unimplemented. Dupehound (structural fingerprints / winnowing, **not** embeddings) is provided by `@qualety/dry` as artifact id `"dupehound"`.
 
    This avoids both the precision loss of a lowest-common-denominator IR and the cost of re-parsing for every rule.
 
@@ -76,7 +76,7 @@ These decisions are considered stable unless a major new constraint appears:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        CLI / MCP Server                     │
-│  code-invariants check | query | index | report             │
+│  qualety check | query | index | report             │
 └────────────────────────────┬────────────────────────────────┘
                              │
 ┌────────────────────────────▼────────────────────────────────┐
@@ -106,7 +106,7 @@ These decisions are considered stable unless a major new constraint appears:
 
   Product rules in this repo (`ts/public-exports-tested`, `react/no-fetch-in-useeffect`, `react/query-error-handled`, `dry/no-duplicate-functions`) **must** use concrete suggestions, not the sentinel. CLI prints a `suggestion:` line unless the value is exactly `NO_SUGGESTION`. `report()` fills the sentinel at runtime if the field is missing (JS plugins keep working).
 - **Plugin**: A package that exports `name` plus optional `rules` and/or `provides`. Ruleless plugins (`name` + `provides` only) are shared providers.
-- **Artifact**: Opaque value built once per check when an enabled rule `requires` its id. One provider map: plugin `provides` first, then default registry gap-fill (`"typescript"` → `ParsedProject`; `"dupehound"` in `@code-invariants/dry`). Vector / embedding index is still future.
+- **Artifact**: Opaque value built once per check when an enabled rule `requires` its id. One provider map: plugin `provides` first, then default registry gap-fill (`"typescript"` → `ParsedProject`; `"dupehound"` in `@qualety/dry`). Vector / embedding index is still future.
 
 ## 2. Plugin contract (explicit)
 
@@ -173,7 +173,7 @@ Runtime schemas (engine `safeParse` at load; do **not** replace the TypeScript i
 
 A malformed plugin / rule / provider, invalid `requires`, a missing provider, a duplicate provider id, a build throw, or `getArtifact` for an id not in that rule’s `requires` is an error (exit 2; do not silently skip). Missing-provider copy is provider-neutral (`No provider for artifact "…" (required by …).`). The message names the rule id(s).
 
-A custom plugin is simply an npm package (or local folder) that exports a `Plugin`. The core discovers it from the `plugins` array in the user’s config. Core never ships a default rule table; a rule exists only if a loaded plugin lists it. Installing `@code-invariants/typescript` (or any plugin) does not enable rules until they appear in `config.rules`. `configs.recommended` is an optional preset the user copies in — the engine does not apply it on install.
+A custom plugin is simply an npm package (or local folder) that exports a `Plugin`. The core discovers it from the `plugins` array in the user’s config. Core never ships a default rule table; a rule exists only if a loaded plugin lists it. Installing `@qualety/typescript` (or any plugin) does not enable rules until they appear in `config.rules`. `configs.recommended` is an optional preset the user copies in — the engine does not apply it on install.
 
 **v1 constraint**: plugins are authored in TypeScript/JavaScript only.
 
@@ -181,7 +181,7 @@ A custom plugin is simply an npm package (or local folder) that exports a `Plugi
 
 ### R1 — Query error handling (`react/query-error-handled`)
 
-Implemented in `@code-invariants/react` as **`react/query-error-handled`**.  
+Implemented in `@qualety/react` as **`react/query-error-handled`**.  
 `defineRule` with `requires: ["typescript"]`; read AST from `getArtifact("typescript")` (`ParsedProject`, no cast). Structural only — no mandatory DataRegion / helper.
 
 **Intent:** Every TanStack `useQuery` (and locked twins) usage must not ignore errors.
@@ -202,7 +202,7 @@ Implemented in `@code-invariants/react` as **`react/query-error-handled`**.
 
 ### `react/no-fetch-in-useeffect`
 
-Implemented in `@code-invariants/react`.  
+Implemented in `@qualety/react`.  
 `defineRule` with `requires: ["typescript"]`; read AST from `getArtifact("typescript")` (`ParsedProject`, no cast). Aligns with React’s [You Might Not Need an Effect](https://react.dev/learn/you-might-not-need-an-effect).
 
 **Intent:** Do not kick off HTTP data loading inside `useEffect` / `useLayoutEffect`. Prefer data libraries, route loaders, or RSC.
@@ -225,11 +225,11 @@ Implemented in `@code-invariants/react`.
 
 ### R3 — Semantic style tokens only
 
-**Not the React plugin.** Future `@code-invariants/tailwind` (or DS). Do not add token/class allowlists to `@code-invariants/react`.
+**Not the React plugin.** Future `@qualety/tailwind` (or DS). Do not add token/class allowlists to `@qualety/react`.
 
 ### R4 — Structural DRY (`dry/no-duplicate-functions`)
 
-Implemented in `@code-invariants/dry` as **`dry/no-duplicate-functions`**.  
+Implemented in `@qualety/dry` as **`dry/no-duplicate-functions`**.  
 `defineRule` with `requires: ["dupehound"]`; `getArtifact("dupehound")` is `DupehoundIndex` via `ArtifactMap` merge (no cast). Uses `getCwd`, `getFiles`, `getArtifact`, `report`. The **dry plugin** wraps [dupehound](https://github.com/Rafaelpta/dupehound) `scan --json` in `provides.dupehound.build`; core does not spawn it. We do not reimplement fingerprints.
 
 **Intent:** No structurally duplicate functions/methods in included non-test, non-generated sources.
@@ -245,7 +245,7 @@ Implemented in `@code-invariants/dry` as **`dry/no-duplicate-functions`**.
 | Violation | Copy (non-representative) location; `Omit<Violation, "ruleId">` only (engine stamps severity from config). Message names both functions and similarity; concrete reuse suggestion pointing at the original. Never `NO_SUGGESTION`. Range is best-effort (lines only, column 1). |
 | Severity | `"error"` in recommended; config may set `"warn"`. No extra soft-gate product mode. |
 | Capability | `requires: ["dupehound"]`. Fail closed (exit 2, clear message naming the rule) if the provider is missing, dupehound is missing / unrunnable, times out, or returns invalid JSON. Empty clusters after test/generated skip is success, not an error. |
-| Install | Binary on `PATH` or `CODE_INVARIANTS_DUPEHOUND`. Pin **v0.1.2**. No network in default `check`. Optional `scripts/install-dupehound.sh` for local/CI. |
+| Install | Binary on `PATH` or `QUALETY_DUPEHOUND`. Pin **v0.1.2**. No network in default `check`. Optional `scripts/install-dupehound.sh` for local/CI. |
 
 **Recommended:** `configs.recommended.rules["dry/no-duplicate-functions"] = "error"`. Install does **not** apply recommended (locked #2 / #4).
 
@@ -253,7 +253,7 @@ See [docs/rulesets/dry.md](./rulesets/dry.md).
 
 ### R5 — Test presence (static)
 
-Implemented in `@code-invariants/typescript` as **`ts/public-exports-tested`**.  
+Implemented in `@qualety/typescript` as **`ts/public-exports-tested`**.  
 `defineRule` with `requires: ["typescript"]`; read AST from `getArtifact("typescript")` (`ParsedProject`, no cast). Coverage tools are out of scope for this check.
 
 **Intent:** Every **public** value export in included non-test sources must be referenced at least once from a **test** path.
@@ -277,7 +277,7 @@ See [docs/rulesets/typescript.md](./rulesets/typescript.md).
 
 ### v1 TypeScript plugin catalog
 
-`@code-invariants/typescript` (`name: "ts"`) ships only:
+`@qualety/typescript` (`name: "ts"`) ships only:
 
 | Rule | Status |
 |------|--------|
@@ -287,11 +287,11 @@ See [docs/rulesets/typescript.md](./rulesets/typescript.md).
 
 **Overlap family:** `import-boundary` / layers / no-import-from / no-deep-import / max-relative-depth — catalog **none**.
 
-React compositional rules live in `@code-invariants/react`, not this plugin. See the React catalog below and [docs/rulesets/react.md](./rulesets/react.md).
+React compositional rules live in `@qualety/react`, not this plugin. See the React catalog below and [docs/rulesets/react.md](./rulesets/react.md).
 
 ### v1 React plugin catalog
 
-`@code-invariants/react` (`name: "react"`) ships only:
+`@qualety/react` (`name: "react"`) ships only:
 
 | Rule | Status |
 |------|--------|
@@ -304,7 +304,7 @@ Do **not** own classic eslint-plugin-react / react-hooks / jsx-a11y, TanStack es
 
 ### v1 DRY plugin catalog
 
-`@code-invariants/dry` (`name: "dry"`) ships only:
+`@qualety/dry` (`name: "dry"`) ships only:
 
 | Rule | Status |
 |------|--------|
@@ -315,27 +315,27 @@ Embeddings / semantic near-dupes are **not** this plugin.
 ## 4. CLI interface
 
 ```bash
-code-invariants init
-code-invariants check
-code-invariants check --plugin react
-code-invariants check --rule react/data-region-exhaustive
-code-invariants check --exclude-plugin dry
-code-invariants check --diff
-code-invariants index
-code-invariants query --similar "..."
-code-invariants report
+qualety init
+qualety check
+qualety check --plugin react
+qualety check --rule react/data-region-exhaustive
+qualety check --exclude-plugin dry
+qualety check --diff
+qualety index
+qualety query --similar "..."
+qualety report
 ```
 
 ## 5. Configuration
 
 ```ts
-import { defineConfig } from "code-invariants";
+import { defineConfig } from "qualety";
 
 export default defineConfig({
   plugins: [
-    "@code-invariants/typescript",
-    "@code-invariants/react",
-    // "@code-invariants/dry",
+    "@qualety/typescript",
+    "@qualety/react",
+    // "@qualety/dry",
     "./my-custom-plugin",
   ],
   rules: {

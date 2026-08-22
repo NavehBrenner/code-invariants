@@ -1,9 +1,9 @@
 # React plugin catalog
 
-Honest catalog for **`@code-invariants/react`** (`Plugin.name: "react"`).  
+Honest catalog for **`@qualety/react`** (`Plugin.name: "react"`).  
 This is the implementation list for this plugin plus a **backlog inventory** (not implement-now). Installing the plugin does **not** enable its rules. `configs.recommended` sets both implemented rules to `"error"` for users who opt into that preset.
 
-TanStack Query detectors live **in this plugin** (not a separate `@code-invariants/react-tanstack` package). No runtime UI kit / DataRegion ships here.
+TanStack Query detectors live **in this plugin** (not a separate `@qualety/react-tanstack` package). No runtime UI kit / DataRegion ships here.
 
 Behavior tables are locked in [SPECS.md](../SPECS.md) §3.
 
@@ -70,7 +70,7 @@ Many overlap community [`eslint-plugin-react-you-might-not-need-an-effect`](http
 - `react/no-boolean-prop-explosion` (prefer variant union)
 - controlled XOR uncontrolled patterns
 
-### Next / RSC — prefer future `@code-invariants/next` unless tiny
+### Next / RSC — prefer future `@qualety/next` unless tiny
 
 - serializable Server→Client props
 - server-only / client-only import graph
@@ -79,7 +79,7 @@ Many overlap community [`eslint-plugin-react-you-might-not-need-an-effect`](http
 
 ### Design system
 
-- token / class allowlists → `@code-invariants/tailwind` (or DS) plugin (ex-R3). **Not** this plugin.
+- token / class allowlists → `@qualety/tailwind` (or DS) plugin (ex-R3). **Not** this plugin.
 
 ## Do not own
 

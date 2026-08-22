@@ -1,5 +1,5 @@
 {
-  "name": "code-invariants",
+  "name": "qualety",
   "version": "0.0.0",
   "description": "Executable code invariants and complex best-practice enforcement beyond traditional linting.",
   "license": "MIT",
@@ -12,7 +12,7 @@
   },
   "types": "./dist/index.d.ts",
   "bin": {
-    "code-invariants": "./dist/cli.js"
+    "qualety": "./dist/cli.js"
   },
   "files": [
     "dist"

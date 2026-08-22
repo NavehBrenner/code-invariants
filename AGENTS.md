@@ -5,9 +5,9 @@
 
 ## What this project is
 
-`code-invariants` turns high-level engineering standards into **executable CI checks** so AI coding agents (and humans) get structural quality without relying on prose instructions or manual review of large diffs.
+`qualety` turns high-level engineering standards into **executable CI checks** so AI coding agents (and humans) get structural quality without relying on prose instructions or manual review of large diffs.
 
-It sits **above** formatters and classic linters: plugin rules (compositional AST, test-presence, structural DRY). Not a SAST product; not a reimplementation of Biome/ESLint. Core has **no built-in rule bag** — every check is a plugin rule. Baseline TypeScript lives in `@code-invariants/typescript`. React compositional rules live in `@code-invariants/react`. Structural DRY lives in `@code-invariants/dry`.
+It sits **above** formatters and classic linters: plugin rules (compositional AST, test-presence, structural DRY). Not a SAST product; not a reimplementation of Biome/ESLint. Core has **no built-in rule bag** — every check is a plugin rule. Baseline TypeScript lives in `@qualety/typescript`. React compositional rules live in `@qualety/react`. Structural DRY lives in `@qualety/dry`.
 
 ## What to read before coding
 
@@ -26,10 +26,10 @@ Do **not** invent import-lint / cycle / path-ban rules or a long TypeScript cata
 - Implement against the **plugin contract** and CLI surface in SPECS — do not invent parallel APIs.
 - Prefer **extending plugins** over growing core, unless the change is shared infrastructure (artifact providers, config, reporting).
 - Shared/provider-only packages register as **ruleless plugins** (`name` + `provides`, no `rules`) via `plugins[]`. A rule in any loaded module may `requires` an artifact id provided by another loaded module. Duplicate artifact ids fail closed (exit 2, both owners named). Defaults (`"typescript"`) only fill ids nobody provided.
-- Product plugins are `@code-invariants/typescript`, `@code-invariants/react`, and `@code-invariants/dry`. Do not re-scaffold the engine. Do not pad plugins with empty stub rules.
+- Product plugins are `@qualety/typescript`, `@qualety/react`, and `@qualety/dry`. Do not re-scaffold the engine. Do not pad plugins with empty stub rules.
 - **One coherent change per PR** (one rule, one engine slice, or one docs theme).
 - Add **fixtures** (valid + invalid) for every rule; messages must be actionable by another agent.
-- Dogfood: once `code-invariants check` exists, run it on this repo.
+- Dogfood: once `qualety check` exists, run it on this repo.
 - Core remains **free of generative LLM API keys**; embeddings only for optional semantic DRY.
 
 Prefer **verbose names** (`artifacts`, not `arts`; `artifactBuildContext`, not `abc`). Shorthands only if the full name would make a variable/function identifier **longer than 20 characters**. If a shorthand is used under that rule, put a **comment line immediately above the declaration** with the full verbose intended name.

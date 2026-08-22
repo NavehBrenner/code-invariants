@@ -1,4 +1,4 @@
-import { defineRule, type RuleContext } from "code-invariants";
+import { defineRule, type RuleContext } from "qualety";
 import { Node, SourceFile } from "ts-morph";
 import {
   collectQueryHookBindings,

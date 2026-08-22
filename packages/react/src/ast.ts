@@ -1,4 +1,4 @@
-import type { Range } from "code-invariants";
+import type { Range } from "qualety";
 import {
   type ArrowFunction,
   type FunctionDeclaration,

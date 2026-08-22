@@ -215,7 +215,7 @@ function config(rules: Record<string, string>, extra: Record<string, unknown> = 
 
 test("unknown rule id exits 2", async () => {
   const dir = await writeTree({
-    "code-invariants.config.json": JSON.stringify({
+    "qualety.config.json": JSON.stringify({
       plugins: [],
       rules: { "react/data-region-exhaustive": "error" },
     }),
@@ -228,7 +228,7 @@ test("unknown rule id exits 2", async () => {
 test("all rules off is an honest empty path", async () => {
   const dir = await writeTree({
     "plugin.mjs": fixturePlugin,
-    "code-invariants.config.json": config({ "fixture/ping": "off" }),
+    "qualety.config.json": config({ "fixture/ping": "off" }),
     "src/hello.ts": "export const n = 1;\n",
   });
   const lines: string[] = [];
@@ -239,7 +239,7 @@ test("all rules off is an honest empty path", async () => {
 test("enabled rule collects a violation and exits 1", async () => {
   const dir = await writeTree({
     "plugin.mjs": fixturePlugin,
-    "code-invariants.config.json": config({ "fixture/ping": "error" }),
+    "qualety.config.json": config({ "fixture/ping": "error" }),
     "src/hello.ts": "export const n = 1;\n",
   });
   const lines: string[] = [];
@@ -268,7 +268,7 @@ test("prints suggestion line only when it is not the sentinel", async () => {
   },
 };
 `,
-    "code-invariants.config.json": config({ "fixture/hint": "error" }),
+    "qualety.config.json": config({ "fixture/hint": "error" }),
     "src/hello.ts": "export const n = 1;\n",
   });
   const lines: string[] = [];
@@ -279,7 +279,7 @@ test("prints suggestion line only when it is not the sentinel", async () => {
 test("enabled rule with no violations exits 0 without the empty-path message", async () => {
   const dir = await writeTree({
     "plugin.mjs": fixturePlugin,
-    "code-invariants.config.json": config({ "fixture/quiet": "error" }),
+    "qualety.config.json": config({ "fixture/quiet": "error" }),
     "src/hello.ts": "export const n = 1;\n",
   });
   const lines: string[] = [];
@@ -290,7 +290,7 @@ test("enabled rule with no violations exits 0 without the empty-path message", a
 test("no matching files is an honest empty path", async () => {
   const dir = await writeTree({
     "plugin.mjs": fixturePlugin,
-    "code-invariants.config.json": config({ "fixture/ping": "error" }),
+    "qualety.config.json": config({ "fixture/ping": "error" }),
   });
   const lines: string[] = [];
   expect(await check(dir, (m) => lines.push(String(m)), silent)).toBe(0);
@@ -300,7 +300,7 @@ test("no matching files is an honest empty path", async () => {
 test("TypeScript frontend parses each file once for all rules", async () => {
   const dir = await writeTree({
     "plugin.mjs": fixturePlugin,
-    "code-invariants.config.json": config({ "fixture/first": "error", "fixture/second": "error" }),
+    "qualety.config.json": config({ "fixture/first": "error", "fixture/second": "error" }),
     "src/hello.ts": "export const n = 1;\n",
   });
   const lines: string[] = [];
@@ -313,7 +313,7 @@ test("TypeScript frontend parses each file once for all rules", async () => {
 test("create runs once and can report a cross-file violation", async () => {
   const dir = await writeTree({
     "plugin.mjs": fixturePlugin,
-    "code-invariants.config.json": config({ "fixture/unusedExport": "error" }),
+    "qualety.config.json": config({ "fixture/unusedExport": "error" }),
     "src/a.ts": "export const x = 1;\n",
     "src/b.ts": "export const y = 2;\n",
   });
@@ -330,7 +330,7 @@ test("create runs once and can report a cross-file violation", async () => {
 test("getFiles lists workspace files", async () => {
   const dir = await writeTree({
     "plugin.mjs": fixturePlugin,
-    "code-invariants.config.json": config({ "fixture/listed": "error" }),
+    "qualety.config.json": config({ "fixture/listed": "error" }),
     "src/hello.ts": "export const n = 1;\n",
   });
   const lines: string[] = [];
@@ -342,10 +342,7 @@ test("getFiles lists workspace files", async () => {
 test("getFiles includes non-TS paths", async () => {
   const dir = await writeTree({
     "plugin.mjs": fixturePlugin,
-    "code-invariants.config.json": config(
-      { "fixture/hasNotes": "error" },
-      { include: ["**/*.txt"] },
-    ),
+    "qualety.config.json": config({ "fixture/hasNotes": "error" }, { include: ["**/*.txt"] }),
     "notes.txt": "hello\n",
   });
   const lines: string[] = [];
@@ -356,7 +353,7 @@ test("getFiles includes non-TS paths", async () => {
 test("language provider skips non-TS paths", async () => {
   const dir = await writeTree({
     "plugin.mjs": fixturePlugin,
-    "code-invariants.config.json": config(
+    "qualety.config.json": config(
       { "fixture/tsOnly": "error" },
       { include: ["**/*.ts", "**/*.txt"] },
     ),
@@ -372,7 +369,7 @@ test("language provider skips non-TS paths", async () => {
 test("requires python with no provider exits 2", async () => {
   const dir = await writeTree({
     "plugin.mjs": pluginWith(`{ requires: ["python"], docs: { description: "needs python" } }`),
-    "code-invariants.config.json": config({ "fixture/ping": "error" }),
+    "qualety.config.json": config({ "fixture/ping": "error" }),
     "src/hello.ts": "export const n = 1;\n",
   });
   const errors: string[] = [];
@@ -386,7 +383,7 @@ test("requires python with no provider exits 2", async () => {
 test("invalid requires exits 2", async () => {
   const dir = await writeTree({
     "plugin.mjs": pluginWith(`{ requires: [""], docs: { description: "bad requires" } }`),
-    "code-invariants.config.json": config({ "fixture/ping": "error" }),
+    "qualety.config.json": config({ "fixture/ping": "error" }),
     "src/hello.ts": "export const n = 1;\n",
   });
   const errors: string[] = [];
@@ -439,7 +436,7 @@ export default {
 test("artifact provider builds once and exposes getArtifact", async () => {
   const dir = await writeTree({
     "plugin.mjs": fakeProviderPlugin,
-    "code-invariants.config.json": config({
+    "qualety.config.json": config({
       "fixture/alpha": "error",
       "fixture/beta": "error",
     }),
@@ -455,7 +452,7 @@ test("artifact provider builds once and exposes getArtifact", async () => {
 test("missing provider exits 2 and names the rule", async () => {
   const dir = await writeTree({
     "plugin.mjs": pluginWith(`{ requires: ["ghost"], docs: { description: "needs ghost" } }`),
-    "code-invariants.config.json": config({ "fixture/ping": "error" }),
+    "qualety.config.json": config({ "fixture/ping": "error" }),
     "src/hello.ts": "export const n = 1;\n",
   });
   const errors: string[] = [];
@@ -483,7 +480,7 @@ test("provider build throw exits 2 and names the rule", async () => {
   },
 };
 `,
-    "code-invariants.config.json": config({ "fixture/ping": "error" }),
+    "qualety.config.json": config({ "fixture/ping": "error" }),
     "src/hello.ts": "export const n = 1;\n",
   });
   const errors: string[] = [];
@@ -511,7 +508,7 @@ test("duplicate artifact id exits 2", async () => {
   rules: {},
 };
 `,
-    "code-invariants.config.json": JSON.stringify({
+    "qualety.config.json": JSON.stringify({
       plugins: ["./plugin.mjs", "./other.mjs"],
       rules: { "fixture/ping": "error" },
     }),
@@ -553,7 +550,7 @@ test("plugin provides.typescript overrides the default provider", async () => {
   },
 };
 `,
-    "code-invariants.config.json": config({ "fixture/ping": "error" }),
+    "qualety.config.json": config({ "fixture/ping": "error" }),
     "src/hello.ts": "export const n = 1;\n",
   });
   const lines: string[] = [];
@@ -616,7 +613,7 @@ export default {
   },
 };
 `,
-    "code-invariants.config.json": JSON.stringify({
+    "qualety.config.json": JSON.stringify({
       plugins: ["./providers.mjs", "./plugin.mjs"],
       rules: { "fixture/ping": "error", "fixture/again": "error" },
     }),
@@ -644,7 +641,7 @@ test("getArtifact without require exits 2", async () => {
   },
 };
 `,
-    "code-invariants.config.json": config({ "fixture/listed": "error" }),
+    "qualety.config.json": config({ "fixture/listed": "error" }),
     "src/hello.ts": "export const n = 1;\n",
   });
   const errors: string[] = [];
@@ -655,7 +652,7 @@ test("getArtifact without require exits 2", async () => {
 test("mixed language and plugin artifacts both report", async () => {
   const dir = await writeTree({
     "plugin.mjs": fixturePlugin,
-    "code-invariants.config.json": config({
+    "qualety.config.json": config({
       "fixture/unusedExport": "error",
       "fixture/workspacePing": "error",
     }),
@@ -727,7 +724,7 @@ export default {
   },
 };
 `,
-    "code-invariants.config.json": config({
+    "qualety.config.json": config({
       "fixture/lang": "error",
       "fixture/plug": "error",
       "fixture/both": "error",
@@ -746,7 +743,7 @@ test("module export without name is not a plugin", async () => {
   const dir = await writeTree({
     "plugin.mjs": `export default { rules: {} };
 `,
-    "code-invariants.config.json": config({ "fixture/ping": "error" }),
+    "qualety.config.json": config({ "fixture/ping": "error" }),
     "src/hello.ts": "export const n = 1;\n",
   });
   const errors: string[] = [];
@@ -767,7 +764,7 @@ test("empty artifact id exits 2", async () => {
   },
 };
 `,
-    "code-invariants.config.json": config({ "fixture/ping": "error" }),
+    "qualety.config.json": config({ "fixture/ping": "error" }),
     "src/hello.ts": "export const n = 1;\n",
   });
   const errors: string[] = [];
@@ -788,7 +785,7 @@ test("provider without build exits 2", async () => {
   },
 };
 `,
-    "code-invariants.config.json": config({ "fixture/ping": "error" }),
+    "qualety.config.json": config({ "fixture/ping": "error" }),
     "src/hello.ts": "export const n = 1;\n",
   });
   const errors: string[] = [];
@@ -807,7 +804,7 @@ test("rule missing create exits 2", async () => {
   },
 };
 `,
-    "code-invariants.config.json": config({ "fixture/ping": "error" }),
+    "qualety.config.json": config({ "fixture/ping": "error" }),
     "src/hello.ts": "export const n = 1;\n",
   });
   const errors: string[] = [];
@@ -829,7 +826,7 @@ test("rule missing docs description exits 2", async () => {
   },
 };
 `,
-    "code-invariants.config.json": config({ "fixture/ping": "error" }),
+    "qualety.config.json": config({ "fixture/ping": "error" }),
     "src/hello.ts": "export const n = 1;\n",
   });
   const errors: string[] = [];

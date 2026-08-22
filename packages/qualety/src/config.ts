@@ -17,11 +17,11 @@ export const userConfigSchema = z
 export type UserConfig = z.infer<typeof userConfigSchema>;
 
 export const CONFIG_FILENAMES = [
-  "code-invariants.config.ts",
-  "code-invariants.config.mts",
-  "code-invariants.config.js",
-  "code-invariants.config.mjs",
-  "code-invariants.config.json",
+  "qualety.config.ts",
+  "qualety.config.mts",
+  "qualety.config.js",
+  "qualety.config.mjs",
+  "qualety.config.json",
 ] as const;
 
 export class ConfigError extends Error {

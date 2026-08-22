@@ -25,7 +25,7 @@ test("check with no rules exits 0 and is honest", async () => {
 
 test("check with empty rules object is honest", async () => {
   const dir = await writeTree({
-    "code-invariants.config.json": JSON.stringify({
+    "qualety.config.json": JSON.stringify({
       plugins: [],
       rules: {},
     }),

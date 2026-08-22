@@ -174,7 +174,7 @@ test("resolveDupehoundBinary fails closed when missing", () => {
   expect(() => resolveDupehoundBinary({ PATH: "/nonexistent" })).toThrow(/dupehound/i);
   expect(() =>
     resolveDupehoundBinary({ [DUPEHOUND_ENV]: "/no/such/dupehound", PATH: "/nonexistent" }),
-  ).toThrow(/CODE_INVARIANTS_DUPEHOUND/);
+  ).toThrow(/QUALETY_DUPEHOUND/);
 });
 
 test("buildDupehoundIndex maps stub empty report", async () => {

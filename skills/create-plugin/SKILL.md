@@ -5,7 +5,7 @@
 
 ## When to use
 
-Scaffold a **new** plugin package (e.g. `@code-invariants/typescript`, `@code-invariants/react`, or a user-local plugin) that conforms to the published plugin contract.
+Scaffold a **new** plugin package (e.g. `@qualety/typescript`, `@qualety/react`, or a user-local plugin) that conforms to the published plugin contract.
 
 ## When not to use
 
@@ -22,9 +22,9 @@ Scaffold a **new** plugin package (e.g. `@code-invariants/typescript`, `@code-in
 
 1. Read SPECS § Plugin contract and Locked decisions (plugins are TypeScript in v1).
 2. Create package skeleton:
-   - `package.json` with name `@code-invariants/<name>` or local name
+   - `package.json` with name `@qualety/<name>` or local name
    - Entry that **exports a `Plugin` object** (`name`, `rules`, optional `configs.recommended`)
-3. Export a `Plugin` (`name`, `rules`, optional `configs.recommended`). Installing a plugin must **not** force all rules on. Do not pad the `rules` map with empty stub rules — only real rules. Product plugins already live in `packages/typescript` (`@code-invariants/typescript`, `name: "ts"`), `packages/react` (`@code-invariants/react`, `name: "react"`), and `packages/dry` (`@code-invariants/dry`, `name: "dry"`); do not re-scaffold those plugins or the engine.
+3. Export a `Plugin` (`name`, `rules`, optional `configs.recommended`). Installing a plugin must **not** force all rules on. Do not pad the `rules` map with empty stub rules — only real rules. Product plugins already live in `packages/typescript` (`@qualety/typescript`, `name: "ts"`), `packages/react` (`@qualety/react`, `name: "react"`), and `packages/dry` (`@qualety/dry`, `name: "dry"`); do not re-scaffold those plugins or the engine.
   4. Each requested rule needs `meta.docs`, optional `meta.requires`, and a real `create` via **`defineRule`** (or defer the rule to [add-rule](../add-rule/SKILL.md)). The engine validates `pluginSchema` / `ruleSchema` at load; `defineRule` does not parse. There is one `Rule` / `RuleContext` — no `kind`. TypeScript consumers set `requires: ["typescript"]` and call `getArtifact` (typed from `ArtifactMap`). Same idea on two languages ⇒ two rules. Plugins add `provides` to the same provider map as the default registry — **`build(context)` may spawn**; rules must not. Shared/provider-only packages are **ruleless plugins** (`name` + `provides`, no `rules`) listed in `plugins[]`. Duplicate artifact ids fail closed (both owners named). Defaults only fill gaps — a plugin `provides.typescript` wins. Prefer **verbose names** (`artifacts`, not `arts`; `artifactBuildContext`, not `abc`). Shorthands only if the full name would make a variable/function identifier **longer than 20 characters**. If a shorthand is used under that rule, put a **comment line immediately above the declaration** with the full verbose intended name.
 5. Wire package into the monorepo (or document local path load via `defineConfig` `plugins` array).
 6. Add a smoke test: load plugin, assert `name` and rule ids exist.

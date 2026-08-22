@@ -1,4 +1,4 @@
-import type { Plugin } from "code-invariants";
+import type { Plugin } from "qualety";
 import { noFetchInUseEffect } from "./no-fetch-in-useeffect.ts";
 import { queryErrorHandled } from "./query-error-handled.ts";
 

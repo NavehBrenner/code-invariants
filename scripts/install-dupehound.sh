@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Download pinned dupehound v0.1.2 for this host into .tools/dupehound.
-# Default `code-invariants check` never runs this script (no surprise network).
+# Default `qualety check` never runs this script (no surprise network).
 set -euo pipefail
 
 VERSION="v0.1.2"
@@ -56,4 +56,4 @@ install -m 755 "$tmp/dupehound" "$DEST"
 echo "Installed $("$DEST" --version) to $DEST"
 echo "Use it with:"
 echo "  export PATH=\"$ROOT/.tools:\$PATH\""
-echo "  # or: export CODE_INVARIANTS_DUPEHOUND=\"$DEST\""
+echo "  # or: export QUALETY_DUPEHOUND=\"$DEST\""

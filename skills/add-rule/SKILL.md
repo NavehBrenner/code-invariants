@@ -16,7 +16,7 @@ Add **one** rule to an existing plugin, with fixtures and tests.
 
 ## Steps
 
-1. Confirm the rule belongs in this plugin (language baseline vs framework vs architecture). Do **not** add import-boundary / layers / no-deep-import / cycle / path-ban rules to `@code-invariants/typescript` (SPECS locked #7). Do **not** add token/class allowlists to `@code-invariants/react` (R3 → tailwind/DS). Do not implement backlog rows from [docs/rulesets/react.md](../../docs/rulesets/react.md) unless the task asks for that rule.
+1. Confirm the rule belongs in this plugin (language baseline vs framework vs architecture). Do **not** add import-boundary / layers / no-deep-import / cycle / path-ban rules to `@qualety/typescript` (SPECS locked #7). Do **not** add token/class allowlists to `@qualety/react` (R3 → tailwind/DS). Do not implement backlog rows from [docs/rulesets/react.md](../../docs/rulesets/react.md) unless the task asks for that rule.
   2. Implement a single `Rule` / `RuleContext` (no `meta.kind`) with **`defineRule`** (identity; the engine validates `pluginSchema` / `ruleSchema` at load):
     - Optional `meta.requires` as a const tuple of known artifact ids (e.g. `["typescript"]`; dry: `["dupehound"]`)
     - `create` uses `id` / `options` / `report` / `getCwd` / `getFiles` / `getArtifact(id)` — `getArtifact` returns the typed `ArtifactMap` value (no `as ParsedProject` / `as DupehoundIndex`). Narrow `SourceFile` with `instanceof` / type guards, not `as SourceFile`. Only ids in `requires`; else exit 2

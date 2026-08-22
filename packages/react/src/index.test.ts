@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "vitest";
-import { check } from "../../code-invariants/src/engine.ts";
-import { NO_SUGGESTION } from "../../code-invariants/src/index.ts";
+import { check } from "../../qualety/src/engine.ts";
+import { NO_SUGGESTION } from "../../qualety/src/index.ts";
 import plugin from "./index.ts";
 
 const silent = () => {};
@@ -62,7 +62,7 @@ test("multi-plugin run attributes ts/ and react/ violations with suggestions", a
 
 test("unknown rule id with react plugin loaded exits 2 naming the id", async () => {
   const dir = await writeTree({
-    "code-invariants.config.json": JSON.stringify({
+    "qualety.config.json": JSON.stringify({
       plugins: [reactDist],
       rules: { "react/no-such-rule": "error" },
     }),
@@ -75,7 +75,7 @@ test("unknown rule id with react plugin loaded exits 2 naming the id", async () 
 
 test("loading both plugins without enabling rules is an empty path", async () => {
   const dir = await writeTree({
-    "code-invariants.config.json": JSON.stringify({
+    "qualety.config.json": JSON.stringify({
       plugins: [tsDist, reactDist],
       rules: {},
     }),
