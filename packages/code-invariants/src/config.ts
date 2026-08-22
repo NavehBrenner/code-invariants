@@ -3,8 +3,6 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
 
-const ALLOWED_KEYS = ["plugins", "rules", "include", "exclude"] as const;
-const ALLOWED_KEY_SET = new Set<string>(ALLOWED_KEYS);
 const severitySchema = z.enum(["error", "warn", "off"]);
 
 export const userConfigSchema = z
@@ -107,19 +105,18 @@ function mapConfigZodError(raw: unknown, error: z.ZodError): ConfigError {
     return new ConfigError("Config must be an object");
   }
 
-  const extraKeys = isRecord(raw)
-    ? Object.keys(raw).filter((key) => !ALLOWED_KEY_SET.has(key))
-    : [];
+  const extraKeys = unrecognizedConfigKeys(error);
   if (extraKeys.length > 0) {
+    const allowed = Object.keys(userConfigSchema.shape).join(", ");
     return new ConfigError(
-      `Unknown config key${extraKeys.length > 1 ? "s" : ""}: ${extraKeys.join(", ")}. Allowed keys: ${ALLOWED_KEYS.join(", ")}.`,
+      `Unknown config key${extraKeys.length > 1 ? "s" : ""}: ${extraKeys.join(", ")}. Allowed keys: ${allowed}.`,
     );
   }
 
   const issues = error.issues;
   const missingRequired = issues.some((issue) => {
     const key = issue.path[0];
-    return (key === "plugins" || key === "rules") && isMissingIssue(issue);
+    return (key === "plugins" || key === "rules") && isMissingIssue(issue, raw);
   });
   if (missingRequired) {
     return new ConfigError('Config must include "plugins" and "rules"');
@@ -148,14 +145,19 @@ function mapConfigZodError(raw: unknown, error: z.ZodError): ConfigError {
   return new ConfigError(first?.message ?? "Invalid config");
 }
 
-function isMissingIssue(issue: z.ZodIssue): boolean {
-  if (issue.code !== "invalid_type") {
-    return false;
+function unrecognizedConfigKeys(error: z.ZodError): string[] {
+  const keys: string[] = [];
+  for (const issue of error.issues) {
+    if (issue.code !== "unrecognized_keys") {
+      continue;
+    }
+    keys.push(...issue.keys);
   }
-  if (!isRecord(issue)) {
-    return false;
-  }
-  return issue.received === "undefined" || issue.input === undefined;
+  return keys;
+}
+
+function isMissingIssue(issue: z.ZodIssue, raw: unknown): boolean {
+  return issue.code === "invalid_type" && valueAt(raw, issue.path) === undefined;
 }
 
 function valueAt(raw: unknown, path: PropertyKey[]): unknown {

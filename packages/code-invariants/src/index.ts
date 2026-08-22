@@ -125,3 +125,12 @@ export interface ArtifactMap {
 
 export { defineConfig } from "./config.ts";
 export { defineRule } from "./define-rule.ts";
+export {
+  artifactProviderSchema,
+  functionSchema,
+  pluginProvidesSchema,
+  pluginSchema,
+  requiresSchema,
+  ruleMetaSchema,
+  ruleSchema,
+} from "./schemas.ts";

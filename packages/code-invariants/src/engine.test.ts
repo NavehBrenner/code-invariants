@@ -741,3 +741,100 @@ export default {
   expect(out).toMatch(/fixture\/plug\s+plug builds=1/);
   expect(out).toMatch(/fixture\/both\s+both sources=1 builds=1/);
 });
+
+test("module export without name is not a plugin", async () => {
+  const dir = await writeTree({
+    "plugin.mjs": `export default { rules: {} };
+`,
+    "code-invariants.config.json": config({ "fixture/ping": "error" }),
+    "src/hello.ts": "export const n = 1;\n",
+  });
+  const errors: string[] = [];
+  expect(await check(dir, silent, (m) => errors.push(String(m)))).toBe(2);
+  expect(errors.join("\n")).toMatch(/does not export a Plugin/);
+});
+
+test("empty artifact id exits 2", async () => {
+  const dir = await writeTree({
+    "plugin.mjs": `export default {
+  name: "fixture",
+  provides: { "": { build() {} } },
+  rules: {
+    ping: {
+      meta: { docs: { description: "ping" } },
+      create() {},
+    },
+  },
+};
+`,
+    "code-invariants.config.json": config({ "fixture/ping": "error" }),
+    "src/hello.ts": "export const n = 1;\n",
+  });
+  const errors: string[] = [];
+  expect(await check(dir, silent, (m) => errors.push(String(m)))).toBe(2);
+  expect(errors.join("\n")).toMatch(/empty artifact id/);
+});
+
+test("provider without build exits 2", async () => {
+  const dir = await writeTree({
+    "plugin.mjs": `export default {
+  name: "fixture",
+  provides: { fake: {} },
+  rules: {
+    ping: {
+      meta: { docs: { description: "ping" } },
+      create() {},
+    },
+  },
+};
+`,
+    "code-invariants.config.json": config({ "fixture/ping": "error" }),
+    "src/hello.ts": "export const n = 1;\n",
+  });
+  const errors: string[] = [];
+  expect(await check(dir, silent, (m) => errors.push(String(m)))).toBe(2);
+  expect(errors.join("\n")).toMatch(/without a build function/);
+});
+
+test("rule missing create exits 2", async () => {
+  const dir = await writeTree({
+    "plugin.mjs": `export default {
+  name: "fixture",
+  rules: {
+    ping: {
+      meta: { docs: { description: "ping" } },
+    },
+  },
+};
+`,
+    "code-invariants.config.json": config({ "fixture/ping": "error" }),
+    "src/hello.ts": "export const n = 1;\n",
+  });
+  const errors: string[] = [];
+  expect(await check(dir, silent, (m) => errors.push(String(m)))).toBe(2);
+  expect(errors.join("\n")).toMatch(
+    /Rule "fixture\/ping" is invalid: must have meta.docs.description and a create function/,
+  );
+});
+
+test("rule missing docs description exits 2", async () => {
+  const dir = await writeTree({
+    "plugin.mjs": `export default {
+  name: "fixture",
+  rules: {
+    ping: {
+      meta: { docs: {} },
+      create() {},
+    },
+  },
+};
+`,
+    "code-invariants.config.json": config({ "fixture/ping": "error" }),
+    "src/hello.ts": "export const n = 1;\n",
+  });
+  const errors: string[] = [];
+  expect(await check(dir, silent, (m) => errors.push(String(m)))).toBe(2);
+  expect(errors.join("\n")).toMatch(
+    /Rule "fixture\/ping" is invalid: must have meta.docs.description and a create function/,
+  );
+});

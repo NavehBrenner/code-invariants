@@ -1,6 +1,7 @@
 import { glob } from "node:fs/promises";
 import { basename, dirname, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { z } from "zod";
 import { CONFIG_FILENAMES, ConfigError, loadConfig } from "./config.ts";
 import { DEFAULT_PROVIDERS } from "./default-providers.ts";
 import {
@@ -14,6 +15,7 @@ import {
   type UserConfig,
   type Violation,
 } from "./index.ts";
+import { pluginSchema } from "./schemas.ts";
 
 const NOTHING_TO_CHECK = "No rules configured — nothing to check.";
 const DEFAULT_INCLUDE = ["**/*.ts", "**/*.tsx", "**/*.mts", "**/*.cts"];
@@ -61,10 +63,6 @@ async function runCheck(cwd: string, out: (msg: string) => void): Promise<number
   if (enabled.length === 0) {
     out(NOTHING_TO_CHECK);
     return 0;
-  }
-
-  for (const item of enabled) {
-    validateRequires(item.id, item.rule);
   }
 
   const files = await listWorkspaceFiles(cwd, config);
@@ -137,14 +135,60 @@ async function loadPlugin(spec: string, fromDir: string): Promise<Plugin> {
     throw new ConfigError(`Module "${spec}" does not export a Plugin (default or "plugin")`);
   }
   const candidate = loaded.default ?? loaded.plugin;
-  if (!isPlugin(candidate)) {
+  const parsed = pluginSchema.safeParse(candidate);
+  if (!parsed.success) {
+    throw mapPluginZodError(spec, candidate, parsed.error);
+  }
+  if (!isValidatedPlugin(candidate, parsed.success)) {
     throw new ConfigError(`Module "${spec}" does not export a Plugin (default or "plugin")`);
   }
   return candidate;
 }
 
-function isPlugin(value: unknown): value is Plugin {
-  return isRecord(value) && typeof value.name === "string";
+function isValidatedPlugin(value: unknown, parsedOk: boolean): value is Plugin {
+  return parsedOk;
+}
+
+function pluginDisplayName(spec: string, candidate: unknown): string {
+  if (isRecord(candidate) && typeof candidate.name === "string" && candidate.name.length > 0) {
+    return candidate.name;
+  }
+  return spec;
+}
+
+function mapPluginZodError(spec: string, candidate: unknown, error: z.ZodError): ConfigError {
+  const name = pluginDisplayName(spec, candidate);
+  for (const issue of error.issues) {
+    if (issue.path.length === 0 || (issue.path.length === 1 && issue.path[0] === "name")) {
+      return new ConfigError(`Module "${spec}" does not export a Plugin (default or "plugin")`);
+    }
+    if (issue.path[0] === "provides") {
+      if (issue.path.length === 1) {
+        return new ConfigError(`Plugin "${name}" has invalid provides.`);
+      }
+      const artifactId = issue.path[1];
+      if (artifactId === "") {
+        return new ConfigError(`Plugin "${name}" provides an empty artifact id.`);
+      }
+      if (typeof artifactId === "string") {
+        return new ConfigError(
+          `Plugin "${name}" provides "${artifactId}" without a build function.`,
+        );
+      }
+    }
+    if (issue.path[0] === "rules" && typeof issue.path[1] === "string") {
+      const ruleId = `${name}/${issue.path[1]}`;
+      if (issue.path[2] === "meta" && issue.path[3] === "requires") {
+        return new ConfigError(
+          `Rule "${ruleId}" has invalid requires; must be an array of non-empty artifact ids.`,
+        );
+      }
+      return new ConfigError(
+        `Rule "${ruleId}" is invalid: must have meta.docs.description and a create function.`,
+      );
+    }
+  }
+  return new ConfigError(`Module "${spec}" does not export a Plugin (default or "plugin")`);
 }
 
 function resolveEnabledRules(plugins: Plugin[], rules: Record<string, Severity>): Enabled[] {
@@ -172,21 +216,6 @@ function resolveEnabledRules(plugins: Plugin[], rules: Record<string, Severity>)
     enabled.push({ id, severity, rule });
   }
   return enabled;
-}
-
-function validateRequires(id: string, rule: Rule): void {
-  const requires = rule.meta.requires;
-  if (requires === undefined) {
-    return;
-  }
-  if (
-    !Array.isArray(requires) ||
-    requires.some((item) => typeof item !== "string" || item.length === 0)
-  ) {
-    throw new ConfigError(
-      `Rule "${id}" has invalid requires; must be an array of non-empty artifact ids.`,
-    );
-  }
 }
 
 function requiresOf(item: Enabled): string[] {
@@ -255,16 +284,7 @@ function registerPluginProvides(plugin: Plugin, providers: Map<string, ProviderE
   if (provides === undefined) {
     return;
   }
-  if (!isRecord(provides)) {
-    throw new ConfigError(`Plugin "${plugin.name}" has invalid provides.`);
-  }
   for (const [id, provider] of Object.entries(provides)) {
-    if (id.length === 0) {
-      throw new ConfigError(`Plugin "${plugin.name}" provides an empty artifact id.`);
-    }
-    if (!isArtifactProvider(provider)) {
-      throw new ConfigError(`Plugin "${plugin.name}" provides "${id}" without a build function.`);
-    }
     const existing = providers.get(id);
     if (existing !== undefined) {
       throw new ConfigError(
@@ -273,10 +293,6 @@ function registerPluginProvides(plugin: Plugin, providers: Map<string, ProviderE
     }
     providers.set(id, { provider, owner: plugin.name });
   }
-}
-
-function isArtifactProvider(value: unknown): value is ArtifactProvider {
-  return isRecord(value) && typeof value.build === "function";
 }
 
 function artifactGetter(
