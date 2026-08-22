@@ -1,0 +1,6 @@
+{
+  "plugins": ["../../dist/index.js"],
+  "rules": {
+    "dry/no-duplicate-functions": "warn"
+  }
+}

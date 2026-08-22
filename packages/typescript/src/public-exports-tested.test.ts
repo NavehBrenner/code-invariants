@@ -35,7 +35,6 @@ async function writeTree(files: Record<string, string>): Promise<string> {
 
 function enabledConfig(extra: Record<string, unknown> = {}) {
   return JSON.stringify({
-    languages: ["typescript"],
     plugins: [pluginDist],
     rules: { "ts/public-exports-tested": "error" },
     ...extra,
@@ -122,7 +121,6 @@ test("excluded production file is not reported", async () => {
 test("loading the plugin without enabling the rule is an empty path", async () => {
   const dir = await writeTree({
     "code-invariants.config.json": JSON.stringify({
-      languages: ["typescript"],
       plugins: [pluginDist],
       rules: {},
     }),

@@ -1,29 +1,35 @@
 import { glob } from "node:fs/promises";
-import { basename, dirname, extname, relative, resolve, sep } from "node:path";
+import { basename, dirname, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { z } from "zod";
 import { CONFIG_FILENAMES, ConfigError, loadConfig } from "./config.ts";
-import { createFrontend, hasFrontend } from "./frontend.ts";
+import { DEFAULT_PROVIDERS } from "./default-providers.ts";
 import {
-  type LanguageRule,
+  type ArtifactMap,
+  type ArtifactProvider,
   NO_SUGGESTION,
   type Plugin,
-  type ProjectRule,
   type Rule,
+  type RuleContext,
   type Severity,
-  type SourceUnit,
   type UserConfig,
   type Violation,
 } from "./index.ts";
+import { pluginSchema } from "./schemas.ts";
 
 const NOTHING_TO_CHECK = "No rules configured — nothing to check.";
 const DEFAULT_INCLUDE = ["**/*.ts", "**/*.tsx", "**/*.mts", "**/*.cts"];
 const DEFAULT_EXCLUDE = ["**/node_modules/**", "**/dist/**"];
-const TS_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
 
-type Enabled<T extends Rule> = {
+type Enabled = {
   id: string;
   severity: Exclude<Severity, "off">;
-  rule: T;
+  rule: Rule;
+};
+
+type ProviderEntry = {
+  provider: ArtifactProvider;
+  owner: string;
 };
 
 export async function check(
@@ -59,33 +65,21 @@ async function runCheck(cwd: string, out: (msg: string) => void): Promise<number
     return 0;
   }
 
-  const { languageRules, projectRules } = partitionEnabled(enabled, config.languages);
-
-  const langPipelines: { language: string; rules: Enabled<LanguageRule>[]; files: string[] }[] = [];
-  for (const language of config.languages) {
-    const matching = languageRules.filter((item) => item.rule.meta.languages.includes(language));
-    if (matching.length === 0) {
-      continue;
-    }
-    langPipelines.push({
-      language,
-      rules: matching,
-      files: await listLanguageFiles(cwd, config),
-    });
-  }
-
-  const workspaceFiles =
-    projectRules.length > 0 ? await listWorkspaceFiles(cwd, config) : undefined;
-  const anyFiles =
-    langPipelines.some((pipeline) => pipeline.files.length > 0) ||
-    (workspaceFiles !== undefined && workspaceFiles.length > 0);
-  if (!anyFiles) {
+  const files = await listWorkspaceFiles(cwd, config);
+  if (files.length === 0) {
     out("No files to check.");
     return 0;
   }
 
+  const displayPaths = files.map((abs) => displayPath(cwd, abs));
+  const artifacts = await buildRequiredArtifacts(plugins, enabled, {
+    cwd,
+    files: displayPaths,
+    exclude: mergedExclude(config),
+  });
+
   const violations: Violation[] = [];
-  const report = (item: Enabled<Rule>, violation: Omit<Violation, "ruleId">) => {
+  const report = (item: Enabled, violation: Omit<Violation, "ruleId">) => {
     violations.push({
       ...violation,
       ruleId: item.id,
@@ -95,47 +89,18 @@ async function runCheck(cwd: string, out: (msg: string) => void): Promise<number
     });
   };
 
-  for (const pipeline of langPipelines) {
-    if (pipeline.files.length === 0) {
-      continue;
-    }
-    const frontend = createFrontend(pipeline.language);
-    if (frontend === undefined) {
-      const requiredBy = pipeline.rules[0]?.id ?? pipeline.language;
-      throw new ConfigError(`No frontend for ${pipeline.language} (required by ${requiredBy}).`);
-    }
-    const parsed = frontend.parseFiles(pipeline.files);
-    const displayPaths = pipeline.files.map((abs) => displayPath(cwd, abs));
-    const lookup = createSourceLookup(parsed.sources, cwd);
-    for (const item of pipeline.rules) {
-      item.rule.create({
-        id: item.id,
-        options: undefined,
-        language: pipeline.language,
-        getProject: () => parsed.project,
-        getSources: () => parsed.sources,
-        getFilenames: () => displayPaths,
-        getSource: (name) => lookup(name),
-        report(violation) {
-          report(item, violation);
-        },
-      });
-    }
-  }
-
-  if (workspaceFiles !== undefined && workspaceFiles.length > 0) {
-    const displayPaths = workspaceFiles.map((abs) => displayPath(cwd, abs));
-    for (const item of projectRules) {
-      item.rule.create({
-        id: item.id,
-        options: undefined,
-        getCwd: () => cwd,
-        getFiles: () => displayPaths,
-        report(violation) {
-          report(item, violation);
-        },
-      });
-    }
+  for (const item of enabled) {
+    const allowed = new Set(requiresOf(item));
+    item.rule.create({
+      id: item.id,
+      options: undefined,
+      getCwd: () => cwd,
+      getFiles: () => displayPaths,
+      getArtifact: artifactGetter(allowed, artifacts),
+      report(violation) {
+        report(item, violation);
+      },
+    });
   }
 
   violations.sort(compareViolations);
@@ -158,30 +123,73 @@ async function loadPlugin(spec: string, fromDir: string): Promise<Plugin> {
     spec.startsWith(".") || spec.startsWith("/")
       ? pathToFileURL(resolve(fromDir, spec)).href
       : spec;
-  let mod: Record<string, unknown>;
+  let loaded: unknown;
   try {
-    mod = (await import(target)) as Record<string, unknown>;
+    loaded = await import(target);
   } catch (e) {
     throw new ConfigError(
       `Failed to load plugin "${spec}": ${e instanceof Error ? e.message : String(e)}`,
     );
   }
-  const candidate = mod.default ?? mod.plugin;
-  if (!isPlugin(candidate)) {
-    throw new ConfigError(`Module "${spec}" does not export a Plugin (default or "plugin")`);
-  }
+  const candidate = isRecord(loaded) ? (loaded.default ?? loaded.plugin) : undefined;
+  const parsed = pluginSchema.safeParse(candidate);
+  requirePlugin(spec, candidate, parsed);
   return candidate;
 }
 
-function isPlugin(value: unknown): value is Plugin {
-  if (value === null || typeof value !== "object") {
-    return false;
+function requirePlugin(
+  spec: string,
+  candidate: unknown,
+  parsed: ReturnType<typeof pluginSchema.safeParse>,
+): asserts candidate is Plugin {
+  if (!parsed.success) {
+    throw mapPluginZodError(spec, candidate, parsed.error);
   }
-  const rec = value as Record<string, unknown>;
-  return typeof rec.name === "string";
 }
 
-function resolveEnabledRules(plugins: Plugin[], rules: Record<string, Severity>): Enabled<Rule>[] {
+function pluginDisplayName(spec: string, candidate: unknown): string {
+  if (isRecord(candidate) && typeof candidate.name === "string" && candidate.name.length > 0) {
+    return candidate.name;
+  }
+  return spec;
+}
+
+function mapPluginZodError(spec: string, candidate: unknown, error: z.ZodError): ConfigError {
+  const name = pluginDisplayName(spec, candidate);
+  for (const issue of error.issues) {
+    if (issue.path.length === 0 || (issue.path.length === 1 && issue.path[0] === "name")) {
+      return new ConfigError(`Module "${spec}" does not export a Plugin (default or "plugin")`);
+    }
+    if (issue.path[0] === "provides") {
+      if (issue.path.length === 1) {
+        return new ConfigError(`Plugin "${name}" has invalid provides.`);
+      }
+      const artifactId = issue.path[1];
+      if (artifactId === "") {
+        return new ConfigError(`Plugin "${name}" provides an empty artifact id.`);
+      }
+      if (typeof artifactId === "string") {
+        return new ConfigError(
+          `Plugin "${name}" provides "${artifactId}" without a build function.`,
+        );
+      }
+    }
+    if (issue.path[0] === "rules" && typeof issue.path[1] === "string") {
+      const ruleId = `${name}/${issue.path[1]}`;
+      if (issue.path[2] === "meta" && issue.path[3] === "requires") {
+        return new ConfigError(
+          `Rule "${ruleId}" has invalid requires; must be an array of non-empty artifact ids.`,
+        );
+      }
+      return new ConfigError(
+        `Rule "${ruleId}" is invalid: must have meta.docs.description and a create function.`,
+      );
+    }
+  }
+  return new ConfigError(`Module "${spec}" does not export a Plugin (default or "plugin")`);
+}
+
+function resolveEnabledRules(plugins: Plugin[], rules: Record<string, Severity>): Enabled[] {
   const catalog = new Map<string, Rule>();
   for (const plugin of plugins) {
     for (const [name, rule] of Object.entries(plugin.rules ?? {})) {
@@ -194,124 +202,142 @@ function resolveEnabledRules(plugins: Plugin[], rules: Record<string, Severity>)
       `Unknown rule id${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")}. No loaded plugin defines ${unknown.length > 1 ? "these rules" : "this rule"}.`,
     );
   }
-  const enabled: Enabled<Rule>[] = [];
+  const enabled: Enabled[] = [];
   for (const [id, severity] of Object.entries(rules)) {
     if (severity === "off") {
       continue;
     }
-    const rule = catalog.get(id);
-    if (rule === undefined) {
-      continue;
-    }
-    enabled.push({ id, severity, rule });
+    enabled.push({ id, severity, rule: requireCatalogRule(catalog, id) });
   }
   return enabled;
 }
 
-function partitionEnabled(
-  enabled: Enabled<Rule>[],
-  configLanguages: string[],
-): { languageRules: Enabled<LanguageRule>[]; projectRules: Enabled<ProjectRule>[] } {
-  const languageRules: Enabled<LanguageRule>[] = [];
-  const projectRules: Enabled<ProjectRule>[] = [];
+function requireCatalogRule(catalog: Map<string, Rule>, id: string): Rule {
+  const rule = catalog.get(id);
+  if (rule === undefined) {
+    throw new ConfigError(`Unknown rule id: ${id}. No loaded plugin defines this rule.`);
+  }
+  return rule;
+}
+
+function requiresOf(item: Enabled): string[] {
+  return item.rule.meta.requires ?? [];
+}
+
+async function buildRequiredArtifacts(
+  plugins: Plugin[],
+  enabled: Enabled[],
+  base: { cwd: string; files: readonly string[]; exclude: readonly string[] },
+): Promise<Map<string, unknown>> {
+  const requiredBy = new Map<string, string[]>();
   for (const item of enabled) {
-    const meta = asMeta(item.rule);
-    const kind = meta.kind;
-    if (kind !== "language" && kind !== "project") {
+    for (const id of requiresOf(item)) {
+      const list = requiredBy.get(id) ?? [];
+      list.push(item.id);
+      requiredBy.set(id, list);
+    }
+  }
+  const providers = collectProviders(plugins);
+  const artifacts = new Map<string, unknown>();
+  for (const [id, rules] of requiredBy) {
+    const entry = providers.get(id);
+    if (entry === undefined) {
+      throw new ConfigError(`No provider for artifact "${id}" (required by ${rules.join(", ")}).`);
+    }
+    try {
+      artifacts.set(
+        id,
+        await entry.provider.build({
+          cwd: base.cwd,
+          files: base.files,
+          exclude: base.exclude,
+          requiredBy: rules,
+        }),
+      );
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      if (rules.some((ruleId) => detail.includes(ruleId))) {
+        throw e instanceof ConfigError ? e : new ConfigError(detail);
+      }
       throw new ConfigError(
-        `Rule "${item.id}" meta.kind must be "language" or "project"${kind === undefined ? "" : `; got ${JSON.stringify(kind)}`}.`,
+        `Failed to build artifact "${id}" (required by ${rules.join(", ")}): ${detail}`,
       );
     }
-    if (kind === "language") {
-      validateLanguageMeta(item.id, meta, configLanguages);
-      languageRules.push(item as Enabled<LanguageRule>);
-    } else {
-      validateProjectMeta(item.id, meta);
-      projectRules.push(item as Enabled<ProjectRule>);
+  }
+  return artifacts;
+}
+
+function collectProviders(plugins: Plugin[]): Map<string, ProviderEntry> {
+  const providers = new Map<string, ProviderEntry>();
+  for (const plugin of plugins) {
+    registerPluginProvides(plugin, providers);
+  }
+  for (const [id, createProvider] of Object.entries(DEFAULT_PROVIDERS)) {
+    if (providers.has(id)) {
+      continue;
     }
+    providers.set(id, { provider: createProvider(), owner: "default" });
   }
-  return { languageRules, projectRules };
+  return providers;
 }
 
-function asMeta(rule: Rule): Record<string, unknown> {
-  const meta = (rule as { meta?: unknown }).meta;
-  if (meta === null || typeof meta !== "object" || Array.isArray(meta)) {
-    return {};
-  }
-  return meta as Record<string, unknown>;
-}
-
-function validateLanguageMeta(
-  id: string,
-  meta: Record<string, unknown>,
-  configLanguages: string[],
-): void {
-  const languages = meta.languages;
-  if (
-    !Array.isArray(languages) ||
-    languages.length === 0 ||
-    languages.some((item) => typeof item !== "string")
-  ) {
-    throw new ConfigError(`Rule "${id}" kind "language" requires a non-empty languages array.`);
-  }
-  if ("requires" in meta && meta.requires !== undefined) {
-    throw new ConfigError(`Rule "${id}" is a language rule and must not set requires.`);
-  }
-  const intersection = languages.filter((language) => configLanguages.includes(language));
-  if (intersection.length === 0) {
-    const configured = configLanguages.length > 0 ? configLanguages.join(", ") : "(none)";
-    throw new ConfigError(
-      `Rule "${id}" languages (${languages.join(", ")}) do not intersect config.languages (${configured}).`,
-    );
-  }
-  for (const language of intersection) {
-    if (!hasFrontend(language)) {
-      throw new ConfigError(`No frontend for ${language} (required by ${id}).`);
-    }
-  }
-}
-
-function validateProjectMeta(id: string, meta: Record<string, unknown>): void {
-  const requires = meta.requires;
-  if (requires === undefined) {
+function registerPluginProvides(plugin: Plugin, providers: Map<string, ProviderEntry>): void {
+  const provides = plugin.provides;
+  if (provides === undefined) {
     return;
   }
-  if (!Array.isArray(requires) || requires.some((item) => typeof item !== "string")) {
-    throw new ConfigError(
-      `Rule "${id}" has invalid requires; must be an array of known capability names.`,
-    );
-  }
-  for (const capability of requires) {
-    if (capability !== "index") {
+  for (const [id, provider] of Object.entries(provides)) {
+    const existing = providers.get(id);
+    if (existing !== undefined) {
       throw new ConfigError(
-        `Rule "${id}" has invalid requires value: ${JSON.stringify(capability)}.`,
+        `Artifact "${id}" is provided by more than one owner (${existing.owner}, ${plugin.name}).`,
       );
     }
-  }
-  if (requires.includes("index")) {
-    throw new ConfigError(`Index not implemented (required by ${id}).`);
+    providers.set(id, { provider, owner: plugin.name });
   }
 }
 
-async function listLanguageFiles(cwd: string, config: UserConfig): Promise<string[]> {
-  return collectFiles(cwd, config, true);
+function artifactGetter(
+  allowed: ReadonlySet<string>,
+  artifacts: ReadonlyMap<string, unknown>,
+): RuleContext["getArtifact"] {
+  function getArtifact<Id extends string>(
+    id: Id,
+  ): Id extends keyof ArtifactMap ? ArtifactMap[Id] : unknown;
+  function getArtifact(id: string): unknown {
+    return readArtifact(id, allowed, artifacts);
+  }
+  return getArtifact;
+}
+
+function readArtifact(
+  id: string,
+  allowed: ReadonlySet<string>,
+  artifacts: ReadonlyMap<string, unknown>,
+): unknown {
+  if (!allowed.has(id)) {
+    throw new ConfigError(
+      `getArtifact(${JSON.stringify(id)}) requires meta.requires to include ${JSON.stringify(id)}`,
+    );
+  }
+  if (!artifacts.has(id)) {
+    throw new ConfigError(`Artifact ${JSON.stringify(id)} is not available.`);
+  }
+  return artifacts.get(id);
+}
+
+function mergedExclude(config: UserConfig): string[] {
+  return [...new Set([...(config.exclude ?? DEFAULT_EXCLUDE), ...DEFAULT_EXCLUDE])];
 }
 
 async function listWorkspaceFiles(cwd: string, config: UserConfig): Promise<string[]> {
-  return collectFiles(cwd, config, false);
-}
-
-async function collectFiles(cwd: string, config: UserConfig, tsOnly: boolean): Promise<string[]> {
   const include = config.include ?? DEFAULT_INCLUDE;
-  const exclude = [...new Set([...(config.exclude ?? DEFAULT_EXCLUDE), ...DEFAULT_EXCLUDE])];
+  const exclude = mergedExclude(config);
   const found = new Set<string>();
   for (const pattern of include) {
     for await (const entry of glob(pattern, { cwd, exclude })) {
       const abs = resolve(cwd, entry);
       if (isConfigFilename(abs)) {
-        continue;
-      }
-      if (tsOnly && !hasTsExtension(abs)) {
         continue;
       }
       found.add(abs);
@@ -320,24 +346,9 @@ async function collectFiles(cwd: string, config: UserConfig, tsOnly: boolean): P
   return [...found].sort();
 }
 
-function hasTsExtension(path: string): boolean {
-  return TS_EXTENSIONS.has(extname(path));
-}
-
 function isConfigFilename(path: string): boolean {
-  return (CONFIG_FILENAMES as readonly string[]).includes(basename(path));
-}
-
-function createSourceLookup(
-  sources: ReadonlyMap<string, SourceUnit>,
-  cwd: string,
-): (name: string) => SourceUnit | undefined {
-  const aliases = new Map<string, SourceUnit>();
-  for (const [abs, unit] of sources) {
-    aliases.set(abs, unit);
-    aliases.set(displayPath(cwd, abs), unit);
-  }
-  return (name) => aliases.get(name) ?? aliases.get(resolve(cwd, name));
+  const name = basename(path);
+  return CONFIG_FILENAMES.some((filename) => filename === name);
 }
 
 function displayPath(cwd: string, file: string): string {
@@ -359,4 +370,8 @@ function compareViolations(a: Violation, b: Violation): number {
     a.range.start.column - b.range.start.column ||
     a.ruleId.localeCompare(b.ruleId)
   );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

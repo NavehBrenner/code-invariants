@@ -35,7 +35,7 @@ export async function run(
       allowPositionals: true,
     }));
   } catch (e) {
-    err(`${(e as Error).message}\n\n${USAGE}`);
+    err(`${e instanceof Error ? e.message : String(e)}\n\n${USAGE}`);
     return 2;
   }
 

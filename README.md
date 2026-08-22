@@ -60,9 +60,9 @@ Full research notes and comparisons are in [docs/RESEARCH.md](docs/RESEARCH.md).
 
 ## Status
 
-The engine (`code-invariants check`) loads config, parses TypeScript once (ts-morph), and runs enabled plugin rules. Core has **no built-in rule bag**. Product plugins: [`@code-invariants/typescript`](packages/typescript) (`ts/public-exports-tested`) and [`@code-invariants/react`](packages/react) (`react/no-fetch-in-useeffect`, `react/query-error-handled`). Multi-plugin configs load both; catalog ids are namespaced (`ts/…` vs `react/…`). Every violation has a required `suggestion` (concrete text on product rules). With nothing configured, check reports that honestly and exits 0.
+The engine (`code-invariants check`) loads config, collects **one provider map** (plugin `provides`, then default-registry gap-fill), unions enabled rules’ `requires`, builds each artifact **once**, and runs every rule with the same context. Core has **no built-in rule bag** and **no dupehound (or other niche binary) host**. Default `"typescript"` → ts-morph `ParsedProject` (a plugin may provide the same id; default is skipped). `@code-invariants/dry` provides `"dupehound"`. Shared providers load as ruleless plugins via `plugins[]`. No `config.languages`. In-repo rules use `defineRule` so `getArtifact` is typed. Product plugins: [`@code-invariants/typescript`](packages/typescript) (`ts/public-exports-tested`), [`@code-invariants/react`](packages/react) (`react/no-fetch-in-useeffect`, `react/query-error-handled`), and [`@code-invariants/dry`](packages/dry) (`dry/no-duplicate-functions`). Multi-plugin configs load them together; catalog ids are namespaced (`ts/…` vs `react/…` vs `dry/…`). Every violation has a required `suggestion` (concrete text on product rules). With nothing configured, check reports that honestly and exits 0.
 
-**Core architectural decisions are locked** in [docs/SPECS.md](docs/SPECS.md) (CLI shape, `defineConfig`, plugin contract, TypeScript-first core, no wrapping of Biome/ESLint, native AST per frontend, performance approach, etc.). Catalogs: [docs/rulesets/typescript.md](docs/rulesets/typescript.md), [docs/rulesets/react.md](docs/rulesets/react.md).
+**Core architectural decisions are locked** in [docs/SPECS.md](docs/SPECS.md) (CLI shape, `defineConfig`, plugin contract, TypeScript-first core, no wrapping of Biome/ESLint, default artifact providers, performance approach, etc.). Catalogs: [docs/rulesets/typescript.md](docs/rulesets/typescript.md), [docs/rulesets/react.md](docs/rulesets/react.md), [docs/rulesets/dry.md](docs/rulesets/dry.md). IDE resolve of bare package names needs `pnpm -r build` (dist `.d.ts`).
 
 The original author has a working internal TypeScript/TSX prototype for several of the compositional rules. The goal of this public repo is to generalise it, add the missing pieces (semantic DRY, Python, agent integration, test-presence gates), and make it a proper open-source project that coding agents can build upon.
 
@@ -74,20 +74,28 @@ pnpm fetches the right version itself — no manual install needed.
 ```bash
 pnpm install
 pnpm build   # tsc -b across the workspace
-pnpm test    # vitest
+pnpm test    # vitest (stubs; no dupehound download)
 pnpm check   # biome (lint + format)
 ```
 
+Optional live DRY coverage (not used by default `check` or `pnpm test`):
+
+```bash
+./scripts/install-dupehound.sh
+export CODE_INVARIANTS_DUPEHOUND="$PWD/.tools/dupehound"
+```
+
 Layout: `packages/code-invariants` (engine, CLI, plugin contract),
-`packages/typescript` (`@code-invariants/typescript`), and
-`packages/react` (`@code-invariants/react`).
+`packages/typescript` (`@code-invariants/typescript`),
+`packages/react` (`@code-invariants/react`), and
+`packages/dry` (`@code-invariants/dry`).
 
 ## Roadmap (High Level)
 
 1. **Phase 0** — Documentation & design ✅
 2. **Phase 1** — Core TypeScript engine ✅. Product rules: `@code-invariants/typescript` (`ts/public-exports-tested`) and `@code-invariants/react` (effect-fetch ban + R1-lite query error handling). R3 semantic tokens → future tailwind/DS plugin.
 3. **Phase 2** — CI integration, CLI, and basic MCP server so agents can query/check
-4. **Phase 3** — Semantic DRY layer (vector index + similarity gate)
+4. **Phase 3** — Structural DRY ✅ (`dry/no-duplicate-functions` via plugin-owned dupehound fingerprints). Semantic DRY (vector index + similarity gate) remains later.
 5. **Phase 4** — Python support (libCST / tree-sitter + equivalent rules)
 6. **Phase 5** — Test-presence static checks + richer architecture fitness rules
 7. **Phase 6** — Polish, documentation, example monorepos, community rules registry
@@ -98,7 +106,7 @@ This repository is intentionally structured so that a coding agent can pick it u
 
 Recommended first tasks for an agent:
 
-1. Read `docs/VISION.md`, `docs/SPECS.md`, `docs/RESEARCH.md`, `docs/rulesets/typescript.md`, and `docs/rulesets/react.md`.
+1. Read `docs/VISION.md`, `docs/SPECS.md`, `docs/RESEARCH.md`, `docs/rulesets/typescript.md`, `docs/rulesets/react.md`, and `docs/rulesets/dry.md`.
 2. Treat the **Locked decisions** section in `docs/SPECS.md` as binding.
 3. Add a rule to an existing plugin (or a new plugin via the create-plugin skill). Do **not** re-scaffold the engine, do **not** invent import-lint / cycle / path-ban rules (SPECS locked #7), and do **not** pad plugins with empty stub rules.
 4. Every rule needs valid + invalid fixtures and actionable messages.

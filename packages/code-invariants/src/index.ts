@@ -3,6 +3,9 @@
  * copy of that section and must stay in sync with it.
  */
 
+import type { UserConfig } from "./config.ts";
+
+export type { UserConfig };
 export type Severity = "error" | "warn" | "off";
 
 /** Exact string locked in docs/SPECS.md §1. Use only when a rule has nothing to suggest. */
@@ -27,63 +30,29 @@ export interface Violation {
 export type JSONSchema = Record<string, unknown>;
 
 /**
- * Language-specific AST handle produced by a frontend (ts-morph `SourceFile`
- * for TypeScript). The core never narrows this; rules cast it to the type
- * their frontend documents.
+ * Opaque source handle produced by the default TypeScript provider (ts-morph
+ * `SourceFile`). The core never narrows this; plugin rules use `instanceof`
+ * / type guards at use sites.
  */
 export type SourceUnit = unknown;
-
-export type RuleKind = "language" | "project";
 
 export interface RuleDocs {
   description: string;
   url?: string;
 }
 
-export interface RuleMetaBase {
+export interface RuleMeta {
   docs: RuleDocs;
   schema?: JSONSchema;
   fixable?: "code" | "whitespace";
+  /**
+   * Artifact ids this rule needs (e.g. `"typescript"`, `"dupehound"`).
+   * Engine builds each id once from the single provider map.
+   */
+  requires?: string[];
 }
 
-export interface LanguageRuleMeta extends RuleMetaBase {
-  kind: "language";
-  /** Required, non-empty. Same product idea on two languages ⇒ two rules. */
-  languages: string[];
-}
-
-/**
- * Workspace-level rule. `kind: "project"` is **not** a ts-morph `Project` —
- * language rules use `getProject()` for that.
- */
-export interface ProjectRuleMeta extends RuleMetaBase {
-  kind: "project";
-  /** Optional seam. `"index"` is not implemented yet. */
-  requires?: Array<"index">;
-}
-
-export interface LanguageRuleContext {
-  id: string;
-  /** Already validated against `meta.schema`. */
-  options: unknown;
-  report(violation: Omit<Violation, "ruleId">): void;
-  /** The pipeline language for this invocation. */
-  language: string;
-  /** Native project for **this** language only (ts-morph `Project` for TypeScript). */
-  getProject(): unknown;
-  /** All parsed units for this language run (same Map instance for every rule). */
-  getSources(): ReadonlyMap<string, SourceUnit>;
-  /** Display paths under check (stable order). */
-  getFilenames(): readonly string[];
-  /** Lookup one unit by display or absolute path; undefined if not in the run. */
-  getSource(filename: string): SourceUnit | undefined;
-}
-
-/**
- * Workspace-level context. No language AST APIs (`getProject` / `getSources`).
- * `kind: "project"` ≠ `getProject()`.
- */
-export interface ProjectRuleContext {
+export interface RuleContext {
   id: string;
   /** Already validated against `meta.schema`. */
   options: unknown;
@@ -91,50 +60,55 @@ export interface ProjectRuleContext {
   getCwd(): string;
   /** Workspace paths under include/exclude (display paths, stable order). */
   getFiles(): readonly string[];
+  /**
+   * Artifact built for this run. Only ids listed in `meta.requires`
+   * may be requested; others get an exit-2 error.
+   */
+  getArtifact<Id extends string>(id: Id): Id extends keyof ArtifactMap ? ArtifactMap[Id] : unknown;
+}
+
+/** Input to a plugin `provides` build. Built once per required id per check. */
+export interface ArtifactBuildContext {
+  cwd: string;
+  /** Display paths under include/exclude (stable order). */
+  files: readonly string[];
+  exclude: readonly string[];
+  /** Enabled rule ids that listed this artifact in `meta.requires`. */
+  requiredBy: readonly string[];
+}
+
+export interface ArtifactProvider {
+  build(context: ArtifactBuildContext): Promise<unknown> | unknown;
 }
 
 /** Returned by `create` when a rule wants per-node visiting instead of a one-shot pass. */
 export type RuleListener = Record<string, (node: unknown) => void>;
 
-export interface LanguageRule {
-  meta: LanguageRuleMeta;
+export interface Rule {
+  meta: RuleMeta;
   /**
-   * Once per enabled rule per language. `void`, not `undefined`: a `create`
+   * Once per enabled rule. `void`, not `undefined`: a `create`
    * with no return statement must type-check.
    */
-  create(context: LanguageRuleContext): void | RuleListener;
-}
-
-export interface ProjectRule {
-  meta: ProjectRuleMeta;
-  /**
-   * Once per enabled workspace rule. `void`, not `undefined`: a `create`
-   * with no return statement must type-check.
-   */
-  create(context: ProjectRuleContext): void | RuleListener;
-}
-
-/** Discriminated on `meta.kind`. No default — missing/invalid kind is an error. */
-export type Rule = LanguageRule | ProjectRule;
-
-export interface UserConfig {
-  languages: string[];
-  plugins: string[];
-  rules: Record<string, Severity>;
-  include?: string[];
-  exclude?: string[];
+  create(context: RuleContext): void | RuleListener;
 }
 
 export interface Plugin {
   name: string;
   version?: string;
   rules?: Record<string, Rule>;
+  /**
+   * Artifact providers registered into one map with other plugins, then
+   * gap-filled from the default registry. Duplicate ids fail closed.
+   * Ruleless plugins (`name` + `provides`, no `rules`) are shared providers.
+   */
+  provides?: Record<string, ArtifactProvider>;
   configs?: {
     recommended?: Partial<UserConfig>;
   };
 }
 
-/** Opaque to core; TS frontend uses ts-morph Project + SourceFiles. */
+/** Opaque to core; default TypeScript provider uses ts-morph Project + SourceFiles. */
 export interface ParsedProject {
   /** Native project handle (ts-morph `Project` for TypeScript). */
   readonly project: unknown;
@@ -142,10 +116,21 @@ export interface ParsedProject {
   readonly sources: ReadonlyMap<string, SourceUnit>;
 }
 
-export interface LanguageFrontend {
-  readonly language: string;
-  /** Parse all paths once. Same project/sources object is reused for every rule. */
-  parseFiles(absolutePaths: readonly string[]): ParsedProject;
+/**
+ * Plugins augment via interface merging. Engine still uses Map<string, unknown>.
+ */
+export interface ArtifactMap {
+  typescript: ParsedProject;
 }
 
 export { defineConfig } from "./config.ts";
+export { defineRule } from "./define-rule.ts";
+export {
+  artifactProviderSchema,
+  functionSchema,
+  pluginProvidesSchema,
+  pluginSchema,
+  requiresSchema,
+  ruleMetaSchema,
+  ruleSchema,
+} from "./schemas.ts";

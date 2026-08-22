@@ -1,5 +1,5 @@
-import type { LanguageRule, LanguageRuleContext } from "code-invariants";
-import { Node, type SourceFile } from "ts-morph";
+import { defineRule, type RuleContext } from "code-invariants";
+import { Node, SourceFile } from "ts-morph";
 import {
   collectQueryHookBindings,
   enclosingFunction,
@@ -18,22 +18,28 @@ type Facts = {
   error: Set<string>;
 };
 
-export const queryErrorHandled: LanguageRule = {
+export const queryErrorHandled = defineRule({
   meta: {
-    kind: "language",
-    languages: ["typescript"],
+    requires: ["typescript"],
     docs: {
       description: "Every TanStack useQuery / useInfiniteQuery usage must handle errors.",
     },
   },
   create(context) {
-    for (const [abs, unit] of context.getSources()) {
-      scanFile(unit as SourceFile, abs, context);
+    const parsed = context.getArtifact("typescript");
+    for (const [abs, unit] of parsed.sources) {
+      if (isSourceFile(unit)) {
+        scanFile(unit, abs, context);
+      }
     }
   },
-};
+});
 
-function scanFile(sf: SourceFile, file: string, context: LanguageRuleContext): void {
+function isSourceFile(value: unknown): value is SourceFile {
+  return value instanceof SourceFile;
+}
+
+function scanFile(sf: SourceFile, file: string, context: Pick<RuleContext, "report">): void {
   const { hooks, namespaces } = collectQueryHookBindings(sf);
   if (hooks.size === 0 && namespaces.size === 0) {
     return;

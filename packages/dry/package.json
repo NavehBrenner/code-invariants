@@ -1,0 +1,30 @@
+{
+  "name": "@code-invariants/dry",
+  "version": "0.0.0",
+  "description": "Structural DRY rules for code-invariants.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "code-invariants": "workspace:*",
+    "zod": "^4.0.17"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0"
+  }
+}
