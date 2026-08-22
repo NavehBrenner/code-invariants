@@ -1,4 +1,4 @@
-# Vision — code-invariants
+# Vision — qualety
 
 ## One-sentence vision
 
@@ -40,7 +40,7 @@ There is a missing middle layer: **complex, compositional, semantic, and archite
 
 ## Success criteria
 
-A successful `code-invariants` system lets a team say:
+A successful `qualety` system lets a team say:
 
 > “If the PR is green on our invariant suite, we are confident that the structural, compositional, and test-presence properties we care about are held. Human review can therefore focus almost entirely on business logic, edge cases, and product correctness.”
 

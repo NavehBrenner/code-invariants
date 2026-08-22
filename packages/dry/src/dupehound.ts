@@ -1,11 +1,11 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants } from "node:fs";
 import { delimiter, isAbsolute, join } from "node:path";
-import type { ArtifactBuildContext } from "code-invariants";
+import type { ArtifactBuildContext } from "qualety";
 import { z } from "zod";
 
 export const DUPEHOUND_PIN = "v0.1.2";
-export const DUPEHOUND_ENV = "CODE_INVARIANTS_DUPEHOUND";
+export const DUPEHOUND_ENV = "QUALETY_DUPEHOUND";
 export const SCAN_TIMEOUT_MS = 60_000;
 
 const memberSchema = z
@@ -62,7 +62,7 @@ export type DupehoundIndex = {
   clusters: readonly DupehoundCluster[];
 };
 
-declare module "code-invariants" {
+declare module "qualety" {
   interface ArtifactMap {
     dupehound: DupehoundIndex;
   }

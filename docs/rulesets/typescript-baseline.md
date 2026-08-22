@@ -1,10 +1,10 @@
 # TypeScript baseline ruleset (must-have)
 
 > **This file is a research inventory, not an implementation backlog.**  
-> The v1 TypeScript plugin catalog is [typescript.md](./typescript.md). `@code-invariants/typescript` ships `ts/public-exports-tested` only. §8 module-separation / import-boundary rules are **not** owned by this plugin — use Biome, ESLint, or dependency-cruiser (SPECS locked #7).
+> The v1 TypeScript plugin catalog is [typescript.md](./typescript.md). `@qualety/typescript` ships `ts/public-exports-tested` only. §8 module-separation / import-boundary rules are **not** owned by this plugin — use Biome, ESLint, or dependency-cruiser (SPECS locked #7).
 
 Language-level invariants for TypeScript (no framework-specific rules).  
-This is the foundation every TypeScript project should get from `code-invariants` before React, Node, or other plugins are layered on.
+This is the foundation every TypeScript project should get from `qualety` before React, Node, or other plugins are layered on.
 
 **Sources researched (2026):** typescript-eslint (`recommended` / `strict` / `strict-type-checked` / `stylistic`), Biome recommended + TypeScript rules, TypeScript handbook & `strict` family, `@tsconfig/strictest`, Google TypeScript Style Guide, dependency-cruiser / eslint-plugin-boundaries / Feature-Sliced Design patterns, common production practices.
 
@@ -16,7 +16,7 @@ This is the foundation every TypeScript project should get from `code-invariants
 |--------|--------|
 | **ID** | Stable rule id we will use in config |
 | **Intent** | What we are enforcing and why |
-| **Enforcement** | Where it lives: `tsc` · `biome`/`oxlint` · `code-invariants` · `structural-dry` |
+| **Enforcement** | Where it lives: `tsc` · `biome`/`oxlint` · `qualety` · `structural-dry` |
 | **Default** | `error` / `warn` / `off` in our recommended preset |
 
 Remember: per project design, we do **not** re-implement Biome/ESLint. Trivial and classic lint rules are expected to be run by the user’s fast linter (Biome or Oxlint recommended). We *document* them here so the full quality bar is explicit, and we only implement in our engine what those tools cannot do well.
@@ -25,7 +25,7 @@ Remember: per project design, we do **not** re-implement Biome/ESLint. Trivial a
 
 ## 1. Compiler / type-system foundation (`tsc`)
 
-These are `tsconfig.json` requirements. `code-invariants` should verify they are present (or provide a preset) rather than re-implement the checks.
+These are `tsconfig.json` requirements. `qualety` should verify they are present (or provide a preset) rather than re-implement the checks.
 
 | ID | Intent | Enforcement | Default |
 |----|--------|-------------|--------|
@@ -131,7 +131,7 @@ Align with Google TS style + common ecosystem practice. Enforce via lint where p
 | `ts/naming-constants` | True constants (global immutable): `CONSTANT_CASE` optional; module-level `const` may stay camelCase | lint (configurable) | warn |
 | `ts/naming-no-i-prefix` | Do not prefix interfaces with `I` | lint / convention | error |
 | `ts/naming-no-underscore-prefix` | No leading `_` except for intentionally unused vars | lint | warn |
-| `ts/file-naming` | File names match primary export (configurable: kebab vs camel) | `code-invariants` or lint | warn |
+| `ts/file-naming` | File names match primary export (configurable: kebab vs camel) | `qualety` or lint | warn |
 
 ---
 
@@ -144,14 +144,14 @@ Align with Google TS style + common ecosystem practice. Enforce via lint where p
 | `ts/complexity` / cognitive complexity | Cap cyclomatic/cognitive complexity per function | biome / eslint | warn |
 | `ts/no-nested-ternary` | Avoid nested ternaries | biome / eslint | warn |
 | `ts/max-depth` | Limit block nesting depth | biome / eslint | warn |
-| `ts/no-export-star` | Prefer explicit named re-exports over `export *` (clear public API, better tree-shaking) | lint / `code-invariants` | warn |
+| `ts/no-export-star` | Prefer explicit named re-exports over `export *` (clear public API, better tree-shaking) | lint / `qualety` | warn |
 | `ts/explicit-module-boundary-types` | Explicit return/param types on **exported** functions (not every local) | eslint | warn |
 
 ---
 
 ## 8. Module separation, public API, and layer hierarchy
 
-> **Not a v1 product commitment.** Research only. `@code-invariants/typescript` does **not** implement these rules and must not grow an import-lint clone catalog. Use Biome, ESLint (`import/no-internal-modules`), package `exports`, and dependency-cruiser. See [typescript.md](./typescript.md) and SPECS locked #7.
+> **Not a v1 product commitment.** Research only. `@qualety/typescript` does **not** implement these rules and must not grow an import-lint clone catalog. Use Biome, ESLint (`import/no-internal-modules`), package `exports`, and dependency-cruiser. See [typescript.md](./typescript.md) and SPECS locked #7.
 
 Good codebases are split by **concern** (feature / domain / layer). Each piece exposes a **public API** (typically a barrel `index.ts` or package entrypoint). Cross-boundary imports go **only** through that public API. Dependencies form a **strict stack hierarchy**: higher layers may import lower ones; the reverse is forbidden.
 
@@ -159,20 +159,20 @@ This family overlaps dependency-cruiser, eslint-plugin-boundaries, ArchUnit, She
 
 | ID | Intent | Enforcement | Default |
 |----|--------|-------------|--------|
-| `ts/module-public-api` | Every configured module/feature folder must declare a public entry (`index.ts` or explicit `exports` map). Internals are not part of the API. | `code-invariants` | error |
-| `ts/no-deep-import` | Imports from *outside* a module must target the module’s public entry only — never `feature/internal/...` or `feature/components/Foo`. Same-module relative imports remain allowed. | `code-invariants` | error |
-| `ts/layer-hierarchy` | Imports must respect a declared directed acyclic layer graph (e.g. `ui → application → domain → infra`). Upward or peer-forbidden edges fail the check. | `code-invariants` | error |
-| `ts/no-cross-feature-internals` | Feature A must not import Feature B’s non-public files; only B’s public API. | `code-invariants` | error |
-| `ts/no-circular-imports` | No import cycles in the project graph (modules or files). | `code-invariants` (or dependency-cruiser integration) | error |
-| `ts/explicit-barrel-exports` | Public barrels use explicit `export { X } from './x'` (not `export *`), so the API surface is auditable. | `code-invariants` / lint | warn |
-| `ts/no-barrel-of-barrels` | Limit barrel depth: a public entry may re-export from implementation files, not from nested barrels that re-export everything again (avoids mega-graphs and hidden cycles). | `code-invariants` | warn |
-| `ts/no-cross-package-deep-imports` | In monorepos, packages import other packages only via their package entry / `exports` field — not deep paths into `src/`. | `code-invariants` | error |
+| `ts/module-public-api` | Every configured module/feature folder must declare a public entry (`index.ts` or explicit `exports` map). Internals are not part of the API. | `qualety` | error |
+| `ts/no-deep-import` | Imports from *outside* a module must target the module’s public entry only — never `feature/internal/...` or `feature/components/Foo`. Same-module relative imports remain allowed. | `qualety` | error |
+| `ts/layer-hierarchy` | Imports must respect a declared directed acyclic layer graph (e.g. `ui → application → domain → infra`). Upward or peer-forbidden edges fail the check. | `qualety` | error |
+| `ts/no-cross-feature-internals` | Feature A must not import Feature B’s non-public files; only B’s public API. | `qualety` | error |
+| `ts/no-circular-imports` | No import cycles in the project graph (modules or files). | `qualety` (or dependency-cruiser integration) | error |
+| `ts/explicit-barrel-exports` | Public barrels use explicit `export { X } from './x'` (not `export *`), so the API surface is auditable. | `qualety` / lint | warn |
+| `ts/no-barrel-of-barrels` | Limit barrel depth: a public entry may re-export from implementation files, not from nested barrels that re-export everything again (avoids mega-graphs and hidden cycles). | `qualety` | warn |
+| `ts/no-cross-package-deep-imports` | In monorepos, packages import other packages only via their package entry / `exports` field — not deep paths into `src/`. | `qualety` | error |
 
 ### Configuration sketch
 
 ```ts
 export default defineConfig({
-  plugins: ["@code-invariants/typescript"],
+  plugins: ["@qualety/typescript"],
   architecture: {
     // Modules = units with a public API
     modules: [
@@ -211,10 +211,10 @@ Projects that do not configure `architecture` skip layer/module rules (or get a 
 
 | ID | Intent | Enforcement | Default |
 |----|--------|-------------|--------|
-| `ts/no-default-export` (optional) | Prefer named exports for better refactors & tree-shaking (project choice) | `code-invariants` or lint | off (opt-in) |
-| `ts/explicit-return-type-public-api` | Public/exported API must have explicit return types | `code-invariants` / eslint | warn |
-| `ts/max-file-lines` | Soft/hard cap on file length (e.g. warn 400, error 800) | `code-invariants` | warn |
-| `ts/no-orphan-files` | Source files under `src` must be reachable from entrypoints or tests | `code-invariants` | warn |
+| `ts/no-default-export` (optional) | Prefer named exports for better refactors & tree-shaking (project choice) | `qualety` or lint | off (opt-in) |
+| `ts/explicit-return-type-public-api` | Public/exported API must have explicit return types | `qualety` / eslint | warn |
+| `ts/max-file-lines` | Soft/hard cap on file length (e.g. warn 400, error 800) | `qualety` | warn |
+| `ts/no-orphan-files` | Source files under `src` must be reachable from entrypoints or tests | `qualety` | warn |
 
 ---
 
@@ -223,7 +223,7 @@ Projects that do not configure `architecture` skip layer/module rules (or get a 
 | ID | Intent | Enforcement | Default |
 |----|--------|-------------|--------|
 | `ts/no-duplicate-functions` | Structural near-duplicate functions (renamed clones) fail CI | `structural-dry` (dupehound-style fingerprinting) | error |
-| `ts/semantic-duplicate-symbols` | Newly added symbols too similar to existing ones (embedding similarity) | `code-invariants` semantic index | warn → error |
+| `ts/semantic-duplicate-symbols` | Newly added symbols too similar to existing ones (embedding similarity) | `qualety` semantic index | warn → error |
 | `ts/no-copy-paste-blocks` | Large identical token blocks across files | structural-dry / jscpd-style | warn |
 
 ---
@@ -232,7 +232,7 @@ Projects that do not configure `architecture` skip layer/module rules (or get a 
 
 | ID | Intent | Enforcement | Default |
 |----|--------|-------------|--------|
-| `ts/public-exports-tested` | Every public value export in included non-test sources is referenced from a test path (static; not coverage). **Do not exclude test paths** when this rule is enabled. | `code-invariants` (`@code-invariants/typescript`) | error |
+| `ts/public-exports-tested` | Every public value export in included non-test sources is referenced from a test path (static; not coverage). **Do not exclude test paths** when this rule is enabled. | `qualety` (`@qualety/typescript`) | error |
 | `ts/function-coverage-threshold` | Runtime function coverage ≥ configured threshold (e.g. 80%) | coverage tool (vitest/c8) gated by CI | error |
 
 Note: coverage is necessary but not sufficient; the static reference check catches “never imported in tests” even when coverage tools are misconfigured.
@@ -266,7 +266,7 @@ Users enable via:
 
 ```ts
 export default defineConfig({
-  plugins: ["@code-invariants/typescript"],
+  plugins: ["@qualety/typescript"],
   rules: {
     ...typescriptRecommended,
     // overrides
@@ -279,7 +279,7 @@ export default defineConfig({
 
 ## 13. What we deliberately leave out of the *language* baseline
 
-- React / JSX a11y / hooks rules → `@code-invariants/react`
+- React / JSX a11y / hooks rules → `@qualety/react`
 - Node / security (fs, child_process) → security plugin or Semgrep
 - Import path aliases specific to one bundler → project config
 - Formatting (semicolons, quotes, width) → Biome/Oxlint formatter only
@@ -291,7 +291,7 @@ export default defineConfig({
 ## 14. Implementation notes for agents
 
 1. **Do not reimplement** Biome/typescript-eslint/dependency-cruiser rules. This file is research. Implement only ids listed in [typescript.md](./typescript.md).
-2. Do **not** catalog or implement the §8 overlap family (`no-deep-import`, layers, cycles, path bans) in `@code-invariants/typescript`.
+2. Do **not** catalog or implement the §8 overlap family (`no-deep-import`, layers, cycles, path bans) in `@qualety/typescript`.
 3. For §11, the implemented id is `ts/public-exports-tested`. Keep test files in the language pipeline include set.
 4. For §10, structural fingerprinting / embeddings are later index work — not this plugin.
 5. Prefer **error** for the shipped test-presence rule. Style and complexity stay with the user’s linter.

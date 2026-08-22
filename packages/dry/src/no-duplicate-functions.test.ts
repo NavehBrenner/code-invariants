@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "vitest";
-import { check } from "../../code-invariants/src/engine.ts";
-import { NO_SUGGESTION } from "../../code-invariants/src/index.ts";
+import { check } from "../../qualety/src/engine.ts";
+import { NO_SUGGESTION } from "../../qualety/src/index.ts";
 import { resolveDupehoundBinary } from "./dupehound.ts";
 import { reportsFromIndex } from "./no-duplicate-functions.ts";
 
@@ -84,11 +84,11 @@ process.stdout.write(${JSON.stringify(JSON.stringify(report))});
 async function runFixture(name: string, report: unknown) {
   const stubDir = await mkdtemp(join(tmpdir(), "ci-dry-stub-"));
   const stub = await writeStub(stubDir, report);
-  const prevBin = process.env.CODE_INVARIANTS_DUPEHOUND;
+  const prevBin = process.env.QUALETY_DUPEHOUND;
   const lines: string[] = [];
   const errors: string[] = [];
   try {
-    process.env.CODE_INVARIANTS_DUPEHOUND = stub;
+    process.env.QUALETY_DUPEHOUND = stub;
     const code = await check(
       join(fixtures, name),
       (m) => lines.push(String(m)),
@@ -97,9 +97,9 @@ async function runFixture(name: string, report: unknown) {
     return { code, out: lines.join("\n"), err: errors.join("\n") };
   } finally {
     if (prevBin === undefined) {
-      delete process.env.CODE_INVARIANTS_DUPEHOUND;
+      delete process.env.QUALETY_DUPEHOUND;
     } else {
-      process.env.CODE_INVARIANTS_DUPEHOUND = prevBin;
+      process.env.QUALETY_DUPEHOUND = prevBin;
     }
   }
 }
@@ -354,11 +354,11 @@ test("warn severity prints warn and still exits 1", async () => {
 });
 
 test("missing dupehound binary exits 2 and names the rule", async () => {
-  const prevBin = process.env.CODE_INVARIANTS_DUPEHOUND;
+  const prevBin = process.env.QUALETY_DUPEHOUND;
   const prevPath = process.env.PATH;
   const errors: string[] = [];
   try {
-    delete process.env.CODE_INVARIANTS_DUPEHOUND;
+    delete process.env.QUALETY_DUPEHOUND;
     process.env.PATH = "/nonexistent";
     const code = await check(
       join(fixtures, "unique"),
@@ -369,9 +369,9 @@ test("missing dupehound binary exits 2 and names the rule", async () => {
   } finally {
     process.env.PATH = prevPath;
     if (prevBin === undefined) {
-      delete process.env.CODE_INVARIANTS_DUPEHOUND;
+      delete process.env.QUALETY_DUPEHOUND;
     } else {
-      process.env.CODE_INVARIANTS_DUPEHOUND = prevBin;
+      process.env.QUALETY_DUPEHOUND = prevBin;
     }
   }
   expect(errors.join("\n")).toMatch(/dupehound/i);
@@ -388,10 +388,10 @@ process.stdout.write("not-json");
 `,
     { mode: 0o755 },
   );
-  const prevBin = process.env.CODE_INVARIANTS_DUPEHOUND;
+  const prevBin = process.env.QUALETY_DUPEHOUND;
   const errors: string[] = [];
   try {
-    process.env.CODE_INVARIANTS_DUPEHOUND = stub;
+    process.env.QUALETY_DUPEHOUND = stub;
     const code = await check(
       join(fixtures, "unique"),
       () => {},
@@ -400,9 +400,9 @@ process.stdout.write("not-json");
     expect(code).toBe(2);
   } finally {
     if (prevBin === undefined) {
-      delete process.env.CODE_INVARIANTS_DUPEHOUND;
+      delete process.env.QUALETY_DUPEHOUND;
     } else {
-      process.env.CODE_INVARIANTS_DUPEHOUND = prevBin;
+      process.env.QUALETY_DUPEHOUND = prevBin;
     }
   }
   expect(errors.join("\n")).toMatch(/dupehound/i);
@@ -423,9 +423,9 @@ test("multi-plugin run attributes ts/, react/, and dry/ without cross-talk", asy
 test.skipIf(!hasRealDupehound())(
   "live dupehound scan flags duplicate-pair and not unique",
   async () => {
-    const prevBin = process.env.CODE_INVARIANTS_DUPEHOUND;
+    const prevBin = process.env.QUALETY_DUPEHOUND;
     try {
-      delete process.env.CODE_INVARIANTS_DUPEHOUND;
+      delete process.env.QUALETY_DUPEHOUND;
       const dupLines: string[] = [];
       const dupErr: string[] = [];
       const dup = await check(
@@ -450,9 +450,9 @@ test.skipIf(!hasRealDupehound())(
       expect(uniqLines.join("\n")).not.toMatch(/dry\/no-duplicate-functions/);
     } finally {
       if (prevBin === undefined) {
-        delete process.env.CODE_INVARIANTS_DUPEHOUND;
+        delete process.env.QUALETY_DUPEHOUND;
       } else {
-        process.env.CODE_INVARIANTS_DUPEHOUND = prevBin;
+        process.env.QUALETY_DUPEHOUND = prevBin;
       }
     }
   },

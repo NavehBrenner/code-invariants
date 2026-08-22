@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "vitest";
-import { check } from "../../code-invariants/src/engine.ts";
-import { NO_SUGGESTION } from "../../code-invariants/src/index.ts";
+import { check } from "../../qualety/src/engine.ts";
+import { NO_SUGGESTION } from "../../qualety/src/index.ts";
 import plugin from "./index.ts";
 
 const silent = () => {};
@@ -120,7 +120,7 @@ test("excluded production file is not reported", async () => {
 
 test("loading the plugin without enabling the rule is an empty path", async () => {
   const dir = await writeTree({
-    "code-invariants.config.json": JSON.stringify({
+    "qualety.config.json": JSON.stringify({
       plugins: [pluginDist],
       rules: {},
     }),
@@ -133,7 +133,7 @@ test("loading the plugin without enabling the rule is an empty path", async () =
 
 test("excluding test paths makes a referenced export fail", async () => {
   const dir = await writeTree({
-    "code-invariants.config.json": enabledConfig({ exclude: ["**/*.test.*"] }),
+    "qualety.config.json": enabledConfig({ exclude: ["**/*.test.*"] }),
     "src/foo.ts": "export const foo = 1;\n",
     "src/foo.test.ts": 'import { foo } from "./foo";\n',
   });
@@ -144,7 +144,7 @@ test("excluding test paths makes a referenced export fail", async () => {
 
 test("import * does not satisfy a named export", async () => {
   const dir = await writeTree({
-    "code-invariants.config.json": enabledConfig(),
+    "qualety.config.json": enabledConfig(),
     "src/foo.ts": "export const foo = 1;\n",
     "src/foo.test.ts": 'import * as ns from "./foo";\nvoid ns;\n',
   });
@@ -155,7 +155,7 @@ test("import * does not satisfy a named export", async () => {
 
 test("bare specifiers do not count as references", async () => {
   const dir = await writeTree({
-    "code-invariants.config.json": enabledConfig(),
+    "qualety.config.json": enabledConfig(),
     "src/foo.ts": "export const foo = 1;\n",
     "src/foo.test.ts": 'import { foo } from "foo";\nvoid foo;\n',
   });
@@ -166,7 +166,7 @@ test("bare specifiers do not count as references", async () => {
 
 test("dynamic import does not count as a reference", async () => {
   const dir = await writeTree({
-    "code-invariants.config.json": enabledConfig(),
+    "qualety.config.json": enabledConfig(),
     "src/foo.ts": "export const foo = 1;\n",
     "src/foo.test.ts": 'const m = await import("./foo");\nvoid m;\n',
   });

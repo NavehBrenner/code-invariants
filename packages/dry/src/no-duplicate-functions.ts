@@ -1,4 +1,4 @@
-import { defineRule, type Violation } from "code-invariants";
+import { defineRule, type Violation } from "qualety";
 import type { DupehoundCluster, DupehoundIndex } from "./dupehound.ts";
 
 export const noDuplicateFunctions = defineRule({

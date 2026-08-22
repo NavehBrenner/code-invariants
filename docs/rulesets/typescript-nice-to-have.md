@@ -1,7 +1,7 @@
 # TypeScript nice-to-have ruleset
 
 > **This file is a research inventory, not an implementation backlog.**  
-> The v1 TypeScript plugin catalog is [typescript.md](./typescript.md). Do not treat ids here as rules to add to `@code-invariants/typescript`.
+> The v1 TypeScript plugin catalog is [typescript.md](./typescript.md). Do not treat ids here as rules to add to `@qualety/typescript`.
 
 Optional / advanced TypeScript practices **not** required in the [baseline (must-have)](./typescript-baseline.md).
 
@@ -15,11 +15,11 @@ Use these when a team wants a higher bar, library-quality public APIs, or strong
 
 | ID | Intent | Enforcement | Suggested |
 |----|--------|-------------|----------|
-| `ts/prefer-satisfies` | Prefer `satisfies Type` over `as Type` when validating object/array literals so inference is preserved | `code-invariants` / lint suggestion | warn |
+| `ts/prefer-satisfies` | Prefer `satisfies Type` over `as Type` when validating object/array literals so inference is preserved | `qualety` / lint suggestion | warn |
 | `ts/no-enum` | Prefer `as const` object + derived union over TypeScript `enum` (runtime cost, reverse mapping quirks, `erasableSyntaxOnly`) | lint (`no-restricted-syntax`) | warn |
 | `ts/prefer-string-union-over-enum` | Documented alternative: `const Status = {…} as const; type Status = typeof Status[keyof typeof Status]` | convention / docs | — |
-| `ts/branded-id-types` | Domain IDs (`UserId`, `OrderId`) should be branded types, not bare `string`/`number` (optional project-wide pattern) | `code-invariants` (heuristic) | off |
-| `ts/exhaustive-never-default` | Switch on unions should end with `const _exhaustive: never = x` (stronger than exhaustiveness-check alone) | lint / `code-invariants` | warn |
+| `ts/branded-id-types` | Domain IDs (`UserId`, `OrderId`) should be branded types, not bare `string`/`number` (optional project-wide pattern) | `qualety` (heuristic) | off |
+| `ts/exhaustive-never-default` | Switch on unions should end with `const _exhaustive: never = x` (stronger than exhaustiveness-check alone) | lint / `qualety` | warn |
 | `ts/prefer-discriminated-unions` | Model multi-state data as discriminated unions rather than many optional flags | convention / review | — |
 | `ts/no-invalid-void-type` | Restrict `void` in confusing positions (already partially in baseline type-checked rules) | type-checked lint | warn |
 
@@ -29,9 +29,9 @@ Use these when a team wants a higher bar, library-quality public APIs, or strong
 
 | ID | Intent | Enforcement | Suggested |
 |----|--------|-------------|----------|
-| `ts/no-default-export` | Prefer named exports only (stable names, better refactors) — **opt-in** for apps/libs that agree | lint / `code-invariants` | off |
-| `ts/no-mutable-exports` | Ban `export let` / reassignable live bindings | lint / `code-invariants` | warn |
-| `ts/minimize-exports` | Flag exports never imported from outside the module (dead public surface) | `code-invariants` | warn |
+| `ts/no-default-export` | Prefer named exports only (stable names, better refactors) — **opt-in** for apps/libs that agree | lint / `qualety` | off |
+| `ts/no-mutable-exports` | Ban `export let` / reassignable live bindings | lint / `qualety` | warn |
+| `ts/minimize-exports` | Flag exports never imported from outside the module (dead public surface) | `qualety` | warn |
 | `ts/no-container-classes` | Ban classes that only exist to namespace static methods/constants — use modules | lint | warn |
 | `ts/explicit-accessibility` | Require explicit `readonly` / visibility on class members where it clarifies intent | lint | off |
 | `ts/prefer-readonly-public-props` | Public class fields that are never reassigned should be `readonly` | type-checked | warn |
@@ -44,7 +44,7 @@ Use these when a team wants a higher bar, library-quality public APIs, or strong
 | ID | Intent | Enforcement | Suggested |
 |----|--------|-------------|----------|
 | `ts/import-order` | Groups: builtin → external → internal aliases → parent/sibling relative; newlines between groups | biome / eslint-plugin-import | warn |
-| `ts/no-relative-parent-across-modules` | Ban `../../other-feature/...` when architecture modules are defined — force public API path | `code-invariants` | warn |
+| `ts/no-relative-parent-across-modules` | Ban `../../other-feature/...` when architecture modules are defined — force public API path | `qualety` | warn |
 | `ts/consistent-path-style` | Prefer project alias (`@/…`) **or** relative consistently for cross-folder imports (team choice) | lint | off |
 
 ---
@@ -55,9 +55,9 @@ Baseline already enforces public API + no deep imports. These are stricter polic
 
 | ID | Intent | Enforcement | Suggested |
 |----|--------|-------------|----------|
-| `ts/barrels-only-at-boundaries` | Allow barrels only at configured module/package entries; ban incidental `index.ts` re-export folders | `code-invariants` | off |
-| `ts/prefer-source-imports-internally` | Inside a module, import from source files rather than the module’s own barrel (avoids self-cycles) | `code-invariants` / lint | warn |
-| `ts/max-barrel-export-count` | Soft cap on number of symbols a public barrel re-exports (forces splitting mega-APIs) | `code-invariants` | off |
+| `ts/barrels-only-at-boundaries` | Allow barrels only at configured module/package entries; ban incidental `index.ts` re-export folders | `qualety` | off |
+| `ts/prefer-source-imports-internally` | Inside a module, import from source files rather than the module’s own barrel (avoids self-cycles) | `qualety` / lint | warn |
+| `ts/max-barrel-export-count` | Soft cap on number of symbols a public barrel re-exports (forces splitting mega-APIs) | `qualety` | off |
 
 > Note: the ecosystem is split on barrels. Our **baseline** position is: barrels are valid **as public API facades** at module boundaries; unrestricted barrels everywhere are not.
 
@@ -70,7 +70,7 @@ Baseline already enforces public API + no deep imports. These are stricter polic
 | `ts/prefer-promise-reject-errors` | `Promise.reject` only with `Error` values | lint | warn |
 | `ts/no-async-promise-executor` | Ban `new Promise(async (resolve, reject) => …)` | lint | error (also common in recommended lint) |
 | `ts/await-in-try-catch` | Discourage bare top-level await without error handling in app entry scripts | convention | — |
-| `ts/prefer-result-type` | Optional: public fallible APIs return `Result<T, E>` / never-throw style (project convention) | convention / `code-invariants` | off |
+| `ts/prefer-result-type` | Optional: public fallible APIs return `Result<T, E>` / never-throw style (project convention) | convention / `qualety` | off |
 
 ---
 
@@ -91,7 +91,7 @@ Baseline already enforces public API + no deep imports. These are stricter polic
 |----|--------|-------------|----------|
 | `ts/no-const-enum` | Ban `const enum` (breaks isolated modules / bundlers unless carefully controlled) | lint | warn |
 | `ts/consistent-type-exports-on-api` | Library entrypoints export types with `export type` where value is not needed | lint | warn |
-| `ts/no-side-effect-imports-in-lib` | Library source avoids bare `import './side-effect'` except documented entry | `code-invariants` | off |
+| `ts/no-side-effect-imports-in-lib` | Library source avoids bare `import './side-effect'` except documented entry | `qualety` | off |
 
 ---
 
@@ -110,7 +110,7 @@ Enable selectively:
 
 ```ts
 export default defineConfig({
-  plugins: ["@code-invariants/typescript"],
+  plugins: ["@qualety/typescript"],
   rules: {
     "ts/prefer-satisfies": "warn",
     "ts/no-enum": "warn",

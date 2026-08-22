@@ -1,5 +1,5 @@
 import { dirname, extname, join, resolve } from "node:path";
-import { defineRule, type Range, type RuleContext } from "code-invariants";
+import { defineRule, type Range, type RuleContext } from "qualety";
 import { type ExportDeclaration, Node, SourceFile, SyntaxKind } from "ts-morph";
 
 const TS_EXTS = [".ts", ".tsx", ".mts", ".cts"] as const;

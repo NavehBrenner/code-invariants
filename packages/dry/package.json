@@ -1,7 +1,7 @@
 {
-  "name": "@code-invariants/dry",
+  "name": "@qualety/dry",
   "version": "0.0.0",
-  "description": "Structural DRY rules for code-invariants.",
+  "description": "Structural DRY rules for qualety.",
   "license": "MIT",
   "type": "module",
   "exports": {
@@ -21,7 +21,7 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "code-invariants": "workspace:*",
+    "qualety": "workspace:*",
     "zod": "^4.0.17"
   },
   "devDependencies": {

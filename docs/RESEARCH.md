@@ -1,4 +1,4 @@
-# Research Findings — code-invariants
+# Research Findings — qualety
 
 **Date**: August 2026  
 **Question investigated**: Does a library/tool already exist that enforces *complex* best practices (beyond classic linting) at the level of compositional patterns, semantic DRY, and mandatory test presence, for TypeScript and Python, in a way that is useful for AI coding agents and can largely remove structural concerns from human code review?

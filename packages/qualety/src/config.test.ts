@@ -56,7 +56,7 @@ test("defineConfig accepts config without languages", () => {
 
 test("loadConfig reads a JSON config", async () => {
   const dir = await writeTree({
-    "code-invariants.config.json": JSON.stringify({
+    "qualety.config.json": JSON.stringify({
       plugins: ["./plugin"],
       rules: { "demo/ping": "error" },
     }),
@@ -66,12 +66,12 @@ test("loadConfig reads a JSON config", async () => {
     plugins: ["./plugin"],
     rules: { "demo/ping": "error" },
   });
-  expect(loaded?.path).toBe(join(dir, "code-invariants.config.json"));
+  expect(loaded?.path).toBe(join(dir, "qualety.config.json"));
 });
 
 test("loadConfig reads a JS config default export", async () => {
   const dir = await writeTree({
-    "code-invariants.config.mjs": `export default {
+    "qualety.config.mjs": `export default {
       plugins: [],
       rules: { "demo/off": "off" },
     };
@@ -83,7 +83,7 @@ test("loadConfig reads a JS config default export", async () => {
 
 test("loadConfig reads a TypeScript config default export", async () => {
   const dir = await writeTree({
-    "code-invariants.config.ts": `export default {
+    "qualety.config.ts": `export default {
       plugins: [] as string[],
       rules: {},
     };
@@ -101,7 +101,7 @@ test("loadConfig returns undefined when no config file exists", async () => {
 
 test("loadConfig rejects unknown keys in JSON", async () => {
   const dir = await writeTree({
-    "code-invariants.config.json": JSON.stringify({ ...valid, extra: true }),
+    "qualety.config.json": JSON.stringify({ ...valid, extra: true }),
   });
   await expect(loadConfig(dir)).rejects.toThrow(/Unknown config key: extra/);
 });

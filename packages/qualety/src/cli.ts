@@ -2,10 +2,10 @@
 import { parseArgs } from "node:util";
 import { check } from "./engine.ts";
 
-const USAGE = `code-invariants — executable code invariants
+const USAGE = `qualety — executable code invariants
 
 Usage:
-  code-invariants check [options]
+  qualety check [options]
 
 Options:
   -h, --help  Show this help

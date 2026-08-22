@@ -1,4 +1,4 @@
-import type { Plugin } from "code-invariants";
+import type { Plugin } from "qualety";
 import { buildDupehoundIndex } from "./dupehound.ts";
 import { noDuplicateFunctions } from "./no-duplicate-functions.ts";
 

@@ -1,4 +1,4 @@
-import type { Plugin } from "code-invariants";
+import type { Plugin } from "qualety";
 import { publicExportsTested } from "./public-exports-tested.ts";
 
 const plugin: Plugin = {

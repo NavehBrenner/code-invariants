@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "vitest";
-import { check } from "../../code-invariants/src/engine.ts";
-import { NO_SUGGESTION } from "../../code-invariants/src/index.ts";
+import { check } from "../../qualety/src/engine.ts";
+import { NO_SUGGESTION } from "../../qualety/src/index.ts";
 
 const silent = () => {};
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -41,7 +41,7 @@ function enabledConfig() {
 
 async function runSource(src: string) {
   const dir = await writeTree({
-    "code-invariants.config.json": enabledConfig(),
+    "qualety.config.json": enabledConfig(),
     "src/comp.ts": src,
   });
   const lines: string[] = [];

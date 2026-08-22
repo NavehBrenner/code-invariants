@@ -1,6 +1,6 @@
 # DRY plugin catalog
 
-Honest catalog for **`@code-invariants/dry`** (`Plugin.name: "dry"`).  
+Honest catalog for **`@qualety/dry`** (`Plugin.name: "dry"`).  
 This is the implementation list for this plugin. Installing the plugin does **not** enable its rules. `configs.recommended` sets `dry/no-duplicate-functions` to `"error"` for users who opt into that preset.
 
 The plugin **provides** artifact `"dupehound"` (structural fingerprints via [dupehound](https://github.com/Rafaelpta/dupehound)) on the same provider map as the default registry and other plugins. Core only orchestrates `requires` → build once → `getArtifact`. We do **not** re-own the fingerprinting algorithm. Embeddings / Slopo-style semantic near-dupes and TypeScript interface/type-shape matching are **not** this plugin.
@@ -21,13 +21,13 @@ Behavior is locked in [SPECS.md](../SPECS.md) §3 R4. Summary:
 - **Violation:** non-representative member; `Omit<Violation, "ruleId">` (engine stamps severity). Message names both functions, the original location, and similarity; concrete suggestion to reuse the original. Never `NO_SUGGESTION`. Range is best-effort (start/end line, column 1).
 - **Severity:** `"error"` when enabled via recommended; config may set `"warn"` (label only; violations still fail the run).
 - **Fail closed:** missing provider / missing or unrunnable dupehound, timeout, or invalid JSON → exit 2 with a message that names the rule and how to install. Empty clusters after skips → exit 0.
-- **Install:** put `dupehound` on `PATH`, or set `CODE_INVARIANTS_DUPEHOUND`. No network inside `code-invariants check`. Optional repo helper: `scripts/install-dupehound.sh` (writes `.tools/dupehound`).
+- **Install:** put `dupehound` on `PATH`, or set `QUALETY_DUPEHOUND`. No network inside `qualety check`. Optional repo helper: `scripts/install-dupehound.sh` (writes `.tools/dupehound`).
 
 ## Not planned in this plugin
 
 - Embedding / vector semantic similarity
 - Type-shape / interface / whole-class clone detection (later provider or language rule; not dupehound flags)
-- `code-invariants query --similar` / MCP `query_similar`
+- `qualety query --similar` / MCP `query_similar`
 - Auto-merge / codemod of duplicates
 - Incremental `dupehound check --diff` (later CLI `--diff` work)
 - Reimplementing clone detection in TypeScript
