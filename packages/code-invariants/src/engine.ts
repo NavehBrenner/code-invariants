@@ -131,22 +131,20 @@ async function loadPlugin(spec: string, fromDir: string): Promise<Plugin> {
       `Failed to load plugin "${spec}": ${e instanceof Error ? e.message : String(e)}`,
     );
   }
-  if (!isRecord(loaded)) {
-    throw new ConfigError(`Module "${spec}" does not export a Plugin (default or "plugin")`);
-  }
-  const candidate = loaded.default ?? loaded.plugin;
+  const candidate = isRecord(loaded) ? (loaded.default ?? loaded.plugin) : undefined;
   const parsed = pluginSchema.safeParse(candidate);
-  if (!parsed.success) {
-    throw mapPluginZodError(spec, candidate, parsed.error);
-  }
-  if (!isValidatedPlugin(candidate, parsed.success)) {
-    throw new ConfigError(`Module "${spec}" does not export a Plugin (default or "plugin")`);
-  }
+  requirePlugin(spec, candidate, parsed);
   return candidate;
 }
 
-function isValidatedPlugin(value: unknown, parsedOk: boolean): value is Plugin {
-  return parsedOk;
+function requirePlugin(
+  spec: string,
+  candidate: unknown,
+  parsed: ReturnType<typeof pluginSchema.safeParse>,
+): asserts candidate is Plugin {
+  if (!parsed.success) {
+    throw mapPluginZodError(spec, candidate, parsed.error);
+  }
 }
 
 function pluginDisplayName(spec: string, candidate: unknown): string {
@@ -209,13 +207,17 @@ function resolveEnabledRules(plugins: Plugin[], rules: Record<string, Severity>)
     if (severity === "off") {
       continue;
     }
-    const rule = catalog.get(id);
-    if (rule === undefined) {
-      continue;
-    }
-    enabled.push({ id, severity, rule });
+    enabled.push({ id, severity, rule: requireCatalogRule(catalog, id) });
   }
   return enabled;
+}
+
+function requireCatalogRule(catalog: Map<string, Rule>, id: string): Rule {
+  const rule = catalog.get(id);
+  if (rule === undefined) {
+    throw new ConfigError(`Unknown rule id: ${id}. No loaded plugin defines this rule.`);
+  }
+  return rule;
 }
 
 function requiresOf(item: Enabled): string[] {
